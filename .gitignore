@@ -1,0 +1,7 @@
+# Sanal Ortam (venv) ve Python Önbellek Dosyaları
+venv/
+__pycache__/
+*.pyc
+
+# HASSAS GİZLİ ANAHTARLAR (ASLA YÜKLEMEYİN)
+*.json
