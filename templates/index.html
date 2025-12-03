@@ -16,9 +16,10 @@
             align-items: center;
             background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
             background-size: 20px 20px;
+            overflow: hidden; /* Kaydırma çubuklarını engelle */
         }
 
-        /* --- BOTU ORTALAMA VE BÜYÜTME SİHRİ --- */
+        /* --- BOTU BÜYÜTME AYARLARI --- */
         df-messenger {
             /* Renk Ayarları */
             --df-messenger-bot-message: #e0f2fe;
@@ -42,7 +43,12 @@
 </head>
 <body>
 
-    <!-- Dialogflow Kodunuz (expand="true" EKLENDİ) -->
+    <!-- Yükleniyor Mesajı (Bot gelene kadar görünür) -->
+    <div id="loading-text" style="text-align: center; color: #64748b; position: absolute;">
+        <p>Asistan Yükleniyor...</p>
+    </div>
+
+    <!-- Dialogflow Kodunuz -->
     <script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
     <df-messenger
       intent="WELCOME"
@@ -53,38 +59,53 @@
     ></df-messenger>
 
     <!--
-       HİLE: Bot penceresini CSS ile zorla ortalıyoruz.
-       Dialogflow'un varsayılan davranışı sağ altta durmaktır.
-       Bu script ile onu sayfanın ortasına taşıyoruz.
+       KESİN ORTALAMA SCRIPT'İ
+       setInterval kullanarak botun Shadow DOM'u oluştuğu anda yakalayıp
+       CSS ile zorla ortalıyoruz.
     -->
     <script>
-        // Bot tamamen yüklendiğinde çalışacak fonksiyon
-        window.addEventListener('dfMessengerLoaded', function (event) {
+        // Her 100 milisaniyede bir botun yüklenip yüklenmediğini kontrol et
+        const checkExist = setInterval(function() {
             const dfMessenger = document.querySelector('df-messenger');
 
+            // Eğer bot ve onun gölge kökü (Shadow DOM) oluşmuşsa
             if (dfMessenger && dfMessenger.shadowRoot) {
-                // Botun içine özel stil enjekte ediyoruz
+
+                // 1. Özel stil elementini oluştur
                 const style = document.createElement('style');
                 style.textContent = `
                     div.chat-wrapper {
+                        /* Pozisyonu sabitle */
                         position: fixed !important;
-                        bottom: 50% !important;
-                        right: 50% !important;
-                        transform: translate(50%, 50%) !important;
+
+                        /* Tam ortala: Üstten ve Soldan %50 it, sonra kendi boyutu kadar geri çek */
+                        top: 50% !important;
+                        left: 50% !important;
+                        transform: translate(-50%, -50%) !important;
+
+                        /* Eski alt/sağ ayarlarını sıfırla */
+                        bottom: auto !important;
+                        right: auto !important;
+
+                        /* Görünüm ayarları */
                         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
                         border-radius: 12px !important;
                         z-index: 9999 !important;
                     }
-                    /* İkonu gizle (çünkü pencere zaten açık) */
+
+                    /* Sağ alttaki yuvarlak butonu tamamen yok et */
                     button#widgetIcon {
+                        display: none !important;
+                    }
+                    .df-messenger-wrapper img {
                         display: none !important;
                     }
 
                     /* Mobilde tam ekran */
                     @media (max-width: 768px) {
                         div.chat-wrapper {
-                            bottom: 0 !important;
-                            right: 0 !important;
+                            top: 0 !important;
+                            left: 0 !important;
                             transform: none !important;
                             width: 100% !important;
                             height: 100% !important;
@@ -92,9 +113,22 @@
                         }
                     }
                 `;
+
+                // 2. Stili botun içine enjekte et
                 dfMessenger.shadowRoot.appendChild(style);
+
+                // 3. Botu açık kalmaya zorla
+                dfMessenger.setAttribute('expand', 'true');
+
+                // 4. Yükleniyor yazısını kaldır
+                const loadingText = document.getElementById('loading-text');
+                if(loadingText) loadingText.style.display = 'none';
+
+                // 5. İşlem tamam, döngüyü durdur
+                clearInterval(checkExist);
+                console.log("Bot başarıyla ortalandı.");
             }
-        });
+        }, 100); // 100ms aralıklarla kontrol
     </script>
 
 </body>
