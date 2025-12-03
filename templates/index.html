@@ -29,8 +29,8 @@
             --df-messenger-user-message: #dbeafe;
 
             /* Bot Penceresinin Boyutları */
-            --df-messenger-chat-window-height: 600px; /* Yükseklik */
-            --df-messenger-chat-window-width: 450px;  /* Genişlik */
+            --df-messenger-chat-window-height: 600px;
+            --df-messenger-chat-window-width: 450px;
 
             /* Mobilde tam ekran olsun */
             @media (max-width: 768px) {
@@ -42,31 +42,28 @@
 </head>
 <body>
 
-    <!--
-      ÖNEMLİ AYARLAR:
-      expand="true" -> Sayfa açılınca bot direkt açık gelir.
-      alignment="center" (CSS ile destekledik) -> Ortada durmasını sağlar.
-    -->
-
-    <!-- BURAYA_DIALOGFLOW_KODUNU_YAPISTIR -->
-    <!-- Not: Kodu yapıştırdıktan sonra df-messenger etiketine 'expand="true"' eklemeyi unutma! -->
+    <!-- Dialogflow Kodunuz (expand="true" EKLENDİ) -->
     <script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
-        <df-messenger
-          intent="WELCOME"
-          chat-title="Yardimci-Musteri"
-          agent-id="a1e7ef35-1001-4e5f-b46e-3f2b37cb6bff"
-          language-code="tr"
-        ></df-messenger>
+    <df-messenger
+      intent="WELCOME"
+      chat-title="Yardimci-Musteri"
+      agent-id="a1e7ef35-1001-4e5f-b46e-3f2b37cb6bff"
+      language-code="tr"
+      expand="true"
+    ></df-messenger>
+
     <!--
        HİLE: Bot penceresini CSS ile zorla ortalıyoruz.
        Dialogflow'un varsayılan davranışı sağ altta durmaktır.
        Bu script ile onu sayfanın ortasına taşıyoruz.
     -->
     <script>
-        window.addEventListener('load', function () {
+        // Bot tamamen yüklendiğinde çalışacak fonksiyon
+        window.addEventListener('dfMessengerLoaded', function (event) {
             const dfMessenger = document.querySelector('df-messenger');
-            if (dfMessenger) {
-                // Botun gölge DOM'una (Shadow DOM) erişip stil enjekte ediyoruz
+
+            if (dfMessenger && dfMessenger.shadowRoot) {
+                // Botun içine özel stil enjekte ediyoruz
                 const style = document.createElement('style');
                 style.textContent = `
                     div.chat-wrapper {
@@ -76,7 +73,13 @@
                         transform: translate(50%, 50%) !important;
                         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
                         border-radius: 12px !important;
+                        z-index: 9999 !important;
                     }
+                    /* İkonu gizle (çünkü pencere zaten açık) */
+                    button#widgetIcon {
+                        display: none !important;
+                    }
+
                     /* Mobilde tam ekran */
                     @media (max-width: 768px) {
                         div.chat-wrapper {
@@ -90,9 +93,6 @@
                     }
                 `;
                 dfMessenger.shadowRoot.appendChild(style);
-
-                // Botu otomatik aç
-                dfMessenger.setAttribute('expand', 'true');
             }
         });
     </script>
