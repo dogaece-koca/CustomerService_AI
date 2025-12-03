@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 DB_FILE = os.path.join(os.path.dirname(__file__), 'sirket_veritabani.db')
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(os.path.dirname(__file__), 'google_key.json')
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/dogaecekoca/CustomerService_AI/google_key.json"
 
 PROJECT_ID = "yardimci-musteri-jdch"
 
