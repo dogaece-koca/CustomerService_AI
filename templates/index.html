@@ -3,132 +3,195 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kargo Asistanı</title>
+    <title>Hızlı Kargo Asistanı</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            /* Arka plan rengi */
             background-color: #f0f2f5;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
             background-size: 20px 20px;
-            overflow: hidden; /* Kaydırma çubuklarını engelle */
         }
 
-        /* --- BOTU BÜYÜTME AYARLARI --- */
-        df-messenger {
-            /* Renk Ayarları */
-            --df-messenger-bot-message: #e0f2fe;
-            --df-messenger-button-titlebar-color: #3b82f6;
-            --df-messenger-chat-background-color: #ffffff;
-            --df-messenger-font-color: #333;
-            --df-messenger-send-icon: #3b82f6;
-            --df-messenger-user-message: #dbeafe;
+        /* Ana Çerçeve */
+        .chat-container {
+            width: 400px;
+            height: 650px;
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
 
-            /* Bot Penceresinin Boyutları */
-            --df-messenger-chat-window-height: 600px;
-            --df-messenger-chat-window-width: 450px;
+        /* Başlık */
+        .chat-header {
+            background: #2563eb;
+            color: white;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
 
-            /* Mobilde tam ekran olsun */
-            @media (max-width: 768px) {
-                --df-messenger-chat-window-height: 100%;
-                --df-messenger-chat-window-width: 100%;
+        /* Mesaj Alanı */
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column; /* Mesajları alt alta diz */
+            gap: 15px;
+        }
+
+        /* Ortak Mesaj Stili */
+        .message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.4;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        /* --- YÖN AYARLARI BURADA --- */
+
+        /* Bot Mesajı (SOLDA) */
+        .message.bot {
+            align-self: flex-start; /* Sola yasla */
+            background: #ffffff;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+            border-bottom-left-radius: 2px;
+        }
+
+        /* Kullanıcı Mesajı (SAĞDA) */
+        .message.user {
+            align-self: flex-end; /* Sağa yasla */
+            background: #2563eb;
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        /* Alt Kısım (Input) */
+        .chat-input-area {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 25px;
+            outline: none;
+        }
+
+        .send-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Mobilde tam ekran */
+        @media (max-width: 600px) {
+            .chat-container {
+                width: 100%;
+                height: 100%;
+                border-radius: 0;
             }
         }
     </style>
 </head>
 <body>
 
-    <!-- Yükleniyor Mesajı (Bot gelene kadar görünür) -->
-    <div id="loading-text" style="text-align: center; color: #64748b; position: absolute;">
-        <p>Asistan Yükleniyor...</p>
+    <div class="chat-container">
+        <div class="chat-header">
+            <i class="fas fa-robot"></i>
+            <div>Hızlı Kargo Asistanı</div>
+        </div>
+
+        <div class="chat-messages" id="messagesBox">
+            <!-- Botun ilk mesajı (SOLDA) -->
+            <div class="message bot">
+                Merhaba! 👋 Ben kargo asistanıyım. Sipariş numaranızı yazarsanız kargonuzu sorgulayabilirim.
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="userInput" class="chat-input" placeholder="Bir şeyler yazın..." autocomplete="off">
+            <button onclick="sendMessage()" class="send-btn"><i class="fas fa-paper-plane"></i></button>
+        </div>
     </div>
 
-    <!-- Dialogflow Kodunuz -->
-    <script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
-    <df-messenger
-      intent="WELCOME"
-      chat-title="Yardimci-Musteri"
-      agent-id="a1e7ef35-1001-4e5f-b46e-3f2b37cb6bff"
-      language-code="tr"
-      expand="true"
-    ></df-messenger>
-
-    <!--
-       KESİN ORTALAMA SCRIPT'İ
-       setInterval kullanarak botun Shadow DOM'u oluştuğu anda yakalayıp
-       CSS ile zorla ortalıyoruz.
-    -->
     <script>
-        // Her 100 milisaniyede bir botun yüklenip yüklenmediğini kontrol et
-        const checkExist = setInterval(function() {
-            const dfMessenger = document.querySelector('df-messenger');
+        const inputField = document.getElementById('userInput');
+        const messagesBox = document.getElementById('messagesBox');
 
-            // Eğer bot ve onun gölge kökü (Shadow DOM) oluşmuşsa
-            if (dfMessenger && dfMessenger.shadowRoot) {
+        // Enter tuşu desteği
+        inputField.addEventListener("keypress", function(event) {
+            if (event.key === "Enter") sendMessage();
+        });
 
-                // 1. Özel stil elementini oluştur
-                const style = document.createElement('style');
-                style.textContent = `
-                    div.chat-wrapper {
-                        /* Pozisyonu sabitle */
-                        position: fixed !important;
+        async function sendMessage() {
+            const text = inputField.value.trim();
+            if (text === "") return;
 
-                        /* Tam ortala: Üstten ve Soldan %50 it, sonra kendi boyutu kadar geri çek */
-                        top: 50% !important;
-                        left: 50% !important;
-                        transform: translate(-50%, -50%) !important;
+            // 1. Kullanıcı mesajını ekrana bas (SAĞA)
+            addMessage(text, 'user');
+            inputField.value = "";
 
-                        /* Eski alt/sağ ayarlarını sıfırla */
-                        bottom: auto !important;
-                        right: auto !important;
+            // 2. Bekliyor mesajı (Opsiyonel)
+            const loadingDiv = addMessage("...", 'bot');
 
-                        /* Görünüm ayarları */
-                        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
-                        border-radius: 12px !important;
-                        z-index: 9999 !important;
-                    }
+            try {
+                // 3. Sunucuya gönder
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
 
-                    /* Sağ alttaki yuvarlak butonu tamamen yok et */
-                    button#widgetIcon {
-                        display: none !important;
-                    }
-                    .df-messenger-wrapper img {
-                        display: none !important;
-                    }
+                const data = await response.json();
 
-                    /* Mobilde tam ekran */
-                    @media (max-width: 768px) {
-                        div.chat-wrapper {
-                            top: 0 !important;
-                            left: 0 !important;
-                            transform: none !important;
-                            width: 100% !important;
-                            height: 100% !important;
-                            border-radius: 0 !important;
-                        }
-                    }
-                `;
+                // 4. Bekliyor mesajını sil ve gerçek cevabı yaz
+                loadingDiv.remove();
+                addMessage(data.response, 'bot');
 
-                // 2. Stili botun içine enjekte et
-                dfMessenger.shadowRoot.appendChild(style);
-
-                // 3. Botu açık kalmaya zorla
-                dfMessenger.setAttribute('expand', 'true');
-
-                // 4. Yükleniyor yazısını kaldır
-                const loadingText = document.getElementById('loading-text');
-                if(loadingText) loadingText.style.display = 'none';
-
-                // 5. İşlem tamam, döngüyü durdur
-                clearInterval(checkExist);
-                console.log("Bot başarıyla ortalandı.");
+            } catch (error) {
+                loadingDiv.remove();
+                addMessage("Bağlantı hatası oluştu.", 'bot');
             }
-        }, 100); // 100ms aralıklarla kontrol
+        }
+
+        function addMessage(text, sender) {
+            const div = document.createElement('div');
+            div.classList.add('message', sender);
+            div.innerHTML = text;
+            messagesBox.appendChild(div);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+            return div; // Div'i geri dön (silmek gerekirse diye)
+        }
     </script>
 
 </body>
