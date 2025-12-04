@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, render_template
 import os
 import sqlite3
 import uuid
+import time
+from gtts import gTTS
 
 try:
     from google.cloud import dialogflow_v2 as dialogflow
@@ -12,14 +14,17 @@ except ImportError:
 
 app = Flask(__name__)
 
+# --- AYARLAR ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'sirket_veritabani.db')
 KEY_FILE = os.path.join(BASE_DIR, 'google_key.json')
+AUDIO_FOLDER = os.path.join(BASE_DIR, 'static')
+
+if not os.path.exists(AUDIO_FOLDER):
+    os.makedirs(AUDIO_FOLDER)
 
 if os.path.exists(KEY_FILE):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = KEY_FILE
-else:
-    print(f"KRİTİK UYARI: {KEY_FILE} dosyası bulunamadı!")
 
 PROJECT_ID = "yardimci-musteri-jdch"
 
@@ -27,6 +32,20 @@ def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def metni_sese_cevir(text):
+    """Metni MP3 yapar, kaydeder ve URL döner."""
+    try:
+        tts = gTTS(text=text, lang='tr')
+        filename = f"ses_{uuid.uuid4().hex}.mp3"
+        filepath = os.path.join(AUDIO_FOLDER, filename)
+        tts.save(filepath)
+
+        return f"/static/{filename}"
+    except Exception as e:
+        print(f"TTS Hatası: {e}")
+        return None
 
 
 def kargo_bilgisi_getir(no):
@@ -60,28 +79,22 @@ def kargo_bilgisi_getir(no):
 def fiyat_hesapla(desi, nereye):
     conn = get_db_connection()
     try:
-        # 1. Veritabanındaki parametreleri çek (baz_ucret, desi_birim_ucret, carpanlar)
         cursor = conn.execute("SELECT parametre_adi, deger FROM fiyat_parametreleri")
-        # Gelen veriyi sözlüğe çevir: {'baz_ucret': 35.0, 'desi_birim_ucret': 8.5, ...}
         p = {row['parametre_adi']: row['deger'] for row in cursor.fetchall()}
 
-        # Değerleri al (Veritabanında yoksa varsayılan 0 almasın diye güvenli get kullanıyoruz)
-        baz_ucret = p.get('baz_ucret', 35.0)
+        baz_ucret = p.get('baz_ucret', 30.0)
         birim_ucret = p.get('desi_birim_ucret', 8.5)
 
-        # 2. Çarpanı belirle (Kullanıcının girdiği şehre göre)
         nereye = nereye.lower()
-        carpan = 1.0  # Varsayılan
+        carpan = 1.0
 
         if 'istanbul' in nereye or 'içi' in nereye:
             carpan = p.get('carpan_sehir_ici', 1.0)
-        elif 'ankara' in nereye or 'izmir' in nereye or 'yakın' in nereye:
+        elif 'ankara' in nereye or 'izmir' in nereye:
             carpan = p.get('carpan_yakin_sehir', 1.5)
         else:
-            # Diğer tüm şehirler uzak kabul edilir
             carpan = p.get('carpan_uzak_sehir', 2.2)
 
-        # 3. Hesaplama İşlemi
         tutar = (baz_ucret + (float(desi) * birim_ucret)) * carpan
 
         return {
@@ -89,35 +102,29 @@ def fiyat_hesapla(desi, nereye):
             "desi": str(desi),
             "sehir": nereye
         }
-    except Exception as e:
-        print(f"Hesaplama Hatası: {e}")
+    except:
         return None
     finally:
         conn.close()
 
 
+# --- YAPAY ZEKA ---
 def trigger_dialogflow_event(project_id, session_id, event_name, parameters):
     if dialogflow is None: return None
-
     session_client = dialogflow.SessionsClient(transport="rest")
     session = session_client.session_path(project_id, session_id)
-
     event_input = dialogflow.types.EventInput(name=event_name, parameters=parameters, language_code="tr")
     query_input = dialogflow.types.QueryInput(event=event_input)
-
     response = session_client.detect_intent(session=session, query_input=query_input)
     return response.query_result.fulfillment_text
 
 
 def detect_intent_texts(project_id, session_id, text):
     if dialogflow is None: return None
-
     session_client = dialogflow.SessionsClient(transport="rest")
     session = session_client.session_path(project_id, session_id)
-
     text_input = dialogflow.types.TextInput(text=text, language_code="tr")
     query_input = dialogflow.types.QueryInput(text=text_input)
-
     response = session_client.detect_intent(session=session, query_input=query_input)
     return response.query_result
 
@@ -133,7 +140,7 @@ def chat_api():
     user_message = data.get('message', '')
 
     if dialogflow is None:
-        return jsonify({"response": "Hata: Kütüphane eksik."})
+        return jsonify({"response": "Hata: Kütüphane eksik.", "audio": None})
 
     session_id = str(uuid.uuid4())
 
@@ -141,11 +148,10 @@ def chat_api():
         ai_result = detect_intent_texts(PROJECT_ID, session_id, user_message)
 
         if not ai_result:
-            return jsonify({"response": "Yapay zeka servisine bağlanılamadı."})
+            return jsonify({"response": "Yapay zeka servisine bağlanılamadı.", "audio": None})
 
         intent_name = ai_result.intent.display_name
         params = ai_result.parameters
-
         final_response = ai_result.fulfillment_text
 
         if intent_name == "Siparis_Sorgulama":
@@ -167,24 +173,23 @@ def chat_api():
         elif intent_name == "Fiyat_Sorgulama":
             desi = 1
             sehir = 'uzak'
-
-            if params and 'desi' in params.fields:
-                val = params.fields['desi']
-                if val.kind == 'number_value': desi = val.number_value
-
-            if params and 'sehir' in params.fields:
-                sehir = params.fields['sehir'].string_value
+            if params and 'desi' in params.fields: desi = params.fields['desi'].number_value
+            if params and 'sehir' in params.fields: sehir = params.fields['sehir'].string_value
 
             db_data = fiyat_hesapla(desi, sehir)
-
             if db_data:
                 final_response = trigger_dialogflow_event(PROJECT_ID, session_id, "FIYAT_HESAPLANDI", db_data)
 
-        return jsonify({"response": final_response})
+        audio_url = metni_sese_cevir(final_response)
+
+        return jsonify({
+            "response": final_response,
+            "audio": audio_url
+        })
 
     except Exception as e:
         print(f"Hata: {e}")
-        return jsonify({"response": "Bir hata oluştu."})
+        return jsonify({"response": "Bir hata oluştu.", "audio": None})
 
 
 if __name__ == '__main__':
