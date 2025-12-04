@@ -3,260 +3,226 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sesli Kargo Asistanı</title>
+    <title>Sesli Asistan Modu</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f0f2f5;
+            background-color: #111827;
             margin: 0;
             height: 100vh;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-            background-size: 20px 20px;
-        }
-
-        .chat-container {
-            width: 400px;
-            height: 650px;
-            background: #fff;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-            display: flex;
-            flex-direction: column;
+            font-family: 'Segoe UI', sans-serif;
+            color: white;
             overflow: hidden;
-            border: 1px solid #e5e7eb;
-            position: relative;
         }
 
-        .chat-header {
-            background: #2563eb;
-            color: white;
-            padding: 15px;
+        .avatar-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
             display: flex;
+            justify-content: center;
             align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            position: relative;
-            z-index: 10;
+            margin-bottom: 40px;
         }
 
-        /* Konuşma Animasyonu */
-        .speaking-icon {
-            width: 35px;
-            height: 35px;
-            background: rgba(255,255,255,0.2);
+        .avatar-circle {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
             border-radius: 50%;
             display: flex;
             justify-content: center;
             align-items: center;
-            transition: all 0.3s;
+            font-size: 50px;
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+            z-index: 2;
+            transition: all 0.3s ease;
         }
 
-        .header-active .speaking-icon {
-            background: #fff;
-            color: #2563eb;
-            animation: pulse 1.5s infinite;
+        .listening .avatar-circle {
+            background: linear-gradient(135deg, #10b981, #34d399);
+            box-shadow: 0 0 50px rgba(16, 185, 129, 0.6);
+            transform: scale(1.1);
         }
 
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+        .ripple {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            z-index: 1;
         }
 
-        .chat-messages {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            background: #f8fafc;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
+        .listening .ripple {
+            animation: ripple-anim 2s infinite;
+        }
+        .listening .ripple:nth-child(2) { animation-delay: 0.5s; }
+        .listening .ripple:nth-child(3) { animation-delay: 1s; }
+
+        @keyframes ripple-anim {
+            0% { transform: scale(1); opacity: 0.6; border-color: #10b981; }
+            100% { transform: scale(2.5); opacity: 0; border-color: #10b981; }
         }
 
-        .message {
+        .speaking .avatar-circle {
+            animation: breathe 2s infinite ease-in-out;
+            background: linear-gradient(135deg, #2563eb, #db2777);
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px #2563eb; }
+            50% { transform: scale(1.05); box-shadow: 0 0 60px #db2777; }
+        }
+
+        /* --- METİN ALANI --- */
+        .status-text {
+            font-size: 24px;
+            font-weight: 300;
+            margin-bottom: 10px;
+            min-height: 35px;
+        }
+
+        .transcript-box {
+            font-size: 16px;
+            color: #9ca3af;
+            text-align: center;
             max-width: 80%;
-            padding: 10px 15px;
-            border-radius: 12px;
-            font-size: 14px;
-            line-height: 1.4;
-            word-wrap: break-word;
+            min-height: 24px;
+            margin-bottom: 50px;
         }
 
-        .message.bot {
-            align-self: flex-start;
-            background: #ffffff;
-            color: #1f2937;
-            border: 1px solid #e5e7eb;
-            border-bottom-left-radius: 2px;
-        }
-
-        .message.user {
-            align-self: flex-end;
-            background: #2563eb;
-            color: white;
-            border-bottom-right-radius: 2px;
-        }
-
-        .chat-input-area {
-            padding: 15px;
-            background: white;
-            border-top: 1px solid #e5e7eb;
+        .controls {
             display: flex;
-            gap: 10px;
-            align-items: center;
+            gap: 20px;
         }
 
-        .chat-input {
-            flex: 1;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 25px;
-            outline: none;
-        }
-
-        .action-btn {
-            width: 45px;
-            height: 45px;
-            border-radius: 50%;
+        .btn {
             border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
             cursor: pointer;
+            transition: transform 0.2s;
             display: flex;
-            justify-content: center;
             align-items: center;
-            transition: all 0.2s;
+            gap: 10px;
         }
 
-        .send-btn { background: #2563eb; color: white; }
-        .send-btn:hover { background: #1d4ed8; }
+        .btn:active { transform: scale(0.95); }
 
-        /* Mikrofon Butonu Stili */
-        .mic-btn { background: #f3f4f6; color: #4b5563; }
-        .mic-btn:hover { background: #e5e7eb; }
-
-        .mic-btn.listening {
-            background: #ef4444;
+        .btn-start {
+            background-color: #10b981;
             color: white;
-            animation: pulse-red 1.5s infinite;
         }
 
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        .btn-stop {
+            background-color: #ef4444;
+            color: white;
+            display: none; /* Başlangıçta gizli */
         }
+
     </style>
 </head>
 <body>
 
-    <div class="chat-container">
-        <div class="chat-header" id="chatHeader">
-            <div class="speaking-icon">
-                <i class="fas fa-robot"></i>
-            </div>
-            <div style="margin-left: 10px;">
-                <div>Sesli Asistan</div>
-                <div id="statusText" style="font-size: 10px; opacity: 0.8; display: none;">Konuşuyor...</div>
-            </div>
-        </div>
-
-        <div class="chat-messages" id="messagesBox">
-            <div class="message bot">
-                Merhaba! Mikrofon butonuna basıp konuşabilirsin. 🎙️
-            </div>
-        </div>
-
-        <div class="chat-input-area">
-            <!-- MİKROFON BUTONU (Artık her zaman görünür) -->
-            <button id="micBtn" class="action-btn mic-btn" onclick="toggleMic()">
-                <i class="fas fa-microphone"></i>
-            </button>
-
-            <input type="text" id="userInput" class="chat-input" placeholder="Yazın veya konuşun..." autocomplete="off">
-
-            <button onclick="sendMessage()" class="action-btn send-btn">
-                <i class="fas fa-paper-plane"></i>
-            </button>
+    <div class="avatar-container" id="avatarContainer">
+        <div class="ripple"></div>
+        <div class="ripple"></div>
+        <div class="ripple"></div>
+        <div class="avatar-circle">
+            <i id="statusIcon" class="fas fa-microphone-slash"></i>
         </div>
     </div>
 
-    <!-- GİZLİ SES OYNATICI -->
+    <div class="status-text" id="statusMsg">Başlamak için butona bas</div>
+    <div class="transcript-box" id="transcriptMsg">...</div>
+
+    <div class="controls">
+        <button class="btn btn-start" id="startBtn" onclick="startCall()">
+            <i class="fas fa-phone-alt"></i> Aramayı Başlat
+        </button>
+        <button class="btn btn-stop" id="stopBtn" onclick="endCall()">
+            <i class="fas fa-phone-slash"></i> Kapat
+        </button>
+    </div>
+
     <audio id="audioPlayer" style="display:none;"></audio>
 
     <script>
-        const inputField = document.getElementById('userInput');
-        const messagesBox = document.getElementById('messagesBox');
+        const avatar = document.getElementById('avatarContainer');
+        const icon = document.getElementById('statusIcon');
+        const statusMsg = document.getElementById('statusMsg');
+        const transcriptMsg = document.getElementById('transcriptMsg');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
         const audioPlayer = document.getElementById('audioPlayer');
-        const chatHeader = document.getElementById('chatHeader');
-        const statusText = document.getElementById('statusText');
-        const micBtn = document.getElementById('micBtn');
 
-        // --- 1. SESLİ KOMUT (Konuşmayı Yazıya Çevirme) ---
         let recognition;
+        let isCallActive = false; // Arama durumu
 
-        // Tarayıcı desteğini kontrol et ama butonu gizleme
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
             recognition.lang = 'tr-TR';
-            recognition.continuous = false;
+            recognition.continuous = false; // Cümle bitince dursun
             recognition.interimResults = false;
 
             recognition.onstart = function() {
-                micBtn.classList.add('listening');
-                inputField.placeholder = "Dinliyorum...";
-            };
-
-            recognition.onend = function() {
-                micBtn.classList.remove('listening');
-                inputField.placeholder = "Yazın veya konuşun...";
+                if (!isCallActive) return;
+                setVisualState('listening');
             };
 
             recognition.onresult = function(event) {
-                const transcript = event.results[0][0].transcript;
-                inputField.value = transcript;
-                setTimeout(sendMessage, 500); // Otomatik gönder
+                const text = event.results[0][0].transcript;
+                transcriptMsg.innerText = `"${text}"`;
+
+                sendToBackend(text);
+            };
+
+            recognition.onend = function() {
+                // Eğer bot konuşmuyorsa ve arama aktifse, tekrar dinlemeye başlama kararı
+                // Burada beklemedeyiz, backend'den cevap gelince ses çalacak.
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Hata:", event.error);
+                if (isCallActive && event.error !== 'no-speech') {
+                    setTimeout(() => recognition.start(), 1000);
+                }
             };
         } else {
-            console.log("Web Speech API desteklenmiyor.");
-            // Butonu gizleme kodu kaldırıldı.
+            alert("Tarayıcınız sesli asistanı desteklemiyor. Chrome kullanın.");
         }
 
-        function toggleMic() {
-            if (!recognition) {
-                alert("Tarayıcınız sesli komut özelliğini desteklemiyor. Lütfen Google Chrome kullanın.");
-                return;
-            }
-            if (micBtn.classList.contains('listening')) recognition.stop();
-            else recognition.start();
+
+        function startCall() {
+            isCallActive = true;
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
+
+            recognition.start();
         }
 
-        // --- 2. SES OYNATMA (Görsel Efektler) ---
-        audioPlayer.onplay = function() {
-            chatHeader.classList.add('header-active');
-            statusText.style.display = 'block';
-        };
+        function endCall() {
+            isCallActive = false;
+            recognition.stop();
+            audioPlayer.pause();
 
-        audioPlayer.onended = function() {
-            chatHeader.classList.remove('header-active');
-            statusText.style.display = 'none';
-        };
+            startBtn.style.display = 'flex';
+            stopBtn.style.display = 'none';
+            setVisualState('idle');
+            statusMsg.innerText = "Görüşme sonlandırıldı.";
+        }
 
-        // --- 3. MESAJ GÖNDERME ---
-        inputField.addEventListener("keypress", function(event) {
-            if (event.key === "Enter") sendMessage();
-        });
 
-        async function sendMessage() {
-            const text = inputField.value.trim();
-            if (text === "") return;
-
-            addMessage(text, 'user');
-            inputField.value = "";
-
-            const loadingDiv = addMessage("...", 'bot');
+        async function sendToBackend(text) {
+            setVisualState('processing'); // Düşünüyor...
 
             try {
                 const response = await fetch('/api/chat', {
@@ -267,29 +233,66 @@
 
                 const data = await response.json();
 
-                loadingDiv.remove();
-                addMessage(data.response, 'bot');
+                transcriptMsg.innerText = data.response; // Cevabı yaz
 
-                // Backend'den gelen ses URL'sini oynat
                 if (data.audio) {
-                    audioPlayer.src = data.audio + "?t=" + new Date().getTime();
-                    audioPlayer.play().catch(e => console.log("Otomatik oynatma engellendi.", e));
+                    playResponseAudio(data.audio);
+                } else {
+                    if(isCallActive) recognition.start();
                 }
 
             } catch (error) {
-                loadingDiv.remove();
-                addMessage("Bağlantı hatası.", 'bot');
+                console.error(error);
+                statusMsg.innerText = "Bağlantı hatası.";
+                if(isCallActive) setTimeout(() => recognition.start(), 2000);
             }
         }
 
-        function addMessage(text, sender) {
-            const div = document.createElement('div');
-            div.classList.add('message', sender);
-            div.innerHTML = text;
-            messagesBox.appendChild(div);
-            messagesBox.scrollTop = messagesBox.scrollHeight;
-            return div;
+
+        function playResponseAudio(url) {
+            setVisualState('speaking');
+
+            audioPlayer.src = url + "?t=" + new Date().getTime();
+            audioPlayer.play();
+
+            audioPlayer.onended = function() {
+                if (isCallActive) {
+
+                    console.log("Bot sustu, mikrofon açılıyor...");
+                    try {
+                        recognition.start();
+                    } catch(e) {
+
+                        console.log("Mikrofon zaten hazır.");
+                    }
+                }
+            };
         }
+
+
+        function setVisualState(state) {
+            avatar.classList.remove('listening', 'speaking');
+
+            if (state === 'idle') {
+                icon.className = "fas fa-microphone-slash";
+                statusMsg.innerText = "Hazır";
+            }
+            else if (state === 'listening') {
+                avatar.classList.add('listening');
+                icon.className = "fas fa-microphone";
+                statusMsg.innerText = "Dinliyor...";
+            }
+            else if (state === 'processing') {
+                icon.className = "fas fa-cog fa-spin";
+                statusMsg.innerText = "Düşünüyor...";
+            }
+            else if (state === 'speaking') {
+                avatar.classList.add('speaking');
+                icon.className = "fas fa-volume-up";
+                statusMsg.innerText = "Konuşuyor...";
+            }
+        }
+
     </script>
 </body>
 </html>
