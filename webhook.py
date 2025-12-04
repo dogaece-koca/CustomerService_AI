@@ -2,43 +2,32 @@ from flask import Flask, request, jsonify, render_template
 import os
 import sqlite3
 import uuid
+import json
 from gtts import gTTS
 from dotenv import load_dotenv
 
-# --- GÜVENLİ IMPORTLAR ---
 try:
-    from google.cloud import dialogflow_v2 as dialogflow
     import google.generativeai as genai
 except ImportError:
-    dialogflow = None
     genai = None
-    print("UYARI: Kütüphaneler eksik.")
 
 app = Flask(__name__)
 
 # --- AYARLAR ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'sirket_veritabani.db')
-KEY_FILE = os.path.join(BASE_DIR, 'google_key.json')
 AUDIO_FOLDER = os.path.join(BASE_DIR, 'static')
 ENV_FILE = os.path.join(BASE_DIR, '.env')
 
 load_dotenv(ENV_FILE)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-PROJECT_ID = "yardimci-musteri-jdch"
-if os.path.exists(KEY_FILE): os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = KEY_FILE
-
 if genai and GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-    except Exception as e:
-        print(f"Gemini Config Hatası: {e}")
+    genai.configure(api_key=GEMINI_API_KEY)
 
 if not os.path.exists(AUDIO_FOLDER): os.makedirs(AUDIO_FOLDER)
 
-# Hafıza (Hata Sayacı)
-user_sessions = {}
+chat_histories = {}
 
 
 def get_db_connection():
@@ -47,189 +36,292 @@ def get_db_connection():
     return conn
 
 
-# --- 1. GEMINI AI ---
-def ask_gemini(user_input, context_data=None, is_error=False):
-    if not GEMINI_API_KEY or not genai: return "Sistemsel hata (AI Kapalı)."
-
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-
-        system_prompt = """
-        GÖREV: Sen 'Hızlı Kargo' firmasının yardımsever, profesyonel müşteri temsilcisisin.
-        KİMLİK: Sen bir SESLİ ASİSTANSIN. Kullanıcı seninle konuşarak iletişim kuruyor.
-        TON: Nazik, çözüm odaklı ve doğal Türkçe konuş. Robotik olma.
-        KURAL: Cevaplarında asla "yazın", "girin" gibi ifadeler kullanma. "Söyleyin", "Belirtin" de.
-        """
-
-        if is_error:
-            prompt = f"""
-            {system_prompt}
-            DURUM: Kullanıcı işlem yapmaya çalıştı (Örn: Kargo sorgulama) ama verisi hatalıydı.
-            SİSTEM UYARISI: {context_data}
-            GÖREVİN: Kullanıcıya durumu nazikçe açıkla. "{user_input}" mesajını yok say.
-            Ona numarasını kontrol edip tekrar SÖYLEMESİNİ rica et.
-            """
-        elif context_data:
-            prompt = f"{system_prompt}\nKullanıcı Mesajı: \"{user_input}\"\nSistem Bilgisi: {context_data}\nCevap:"
-        else:
-            prompt = f"{system_prompt}\nKullanıcı: \"{user_input}\"\nGenel sohbet et."
-
-        response = model.generate_content(prompt)
-        return response.text.replace('*', '')
-    except Exception as e:
-        return f"Üzgünüm, şu an cevap üretemiyorum. ({str(e)})"
-
-
-# --- 2. SES OLUŞTURMA ---
-def metni_sese_cevir(text):
-    filename = f"ses_{uuid.uuid4().hex}.mp3"
-    filepath = os.path.join(AUDIO_FOLDER, filename)
-    try:
-        tts = gTTS(text=text, lang='tr')
-        tts.save(filepath)
-        return f"/static/{filename}"
-    except:
-        return None
-
-
-# --- 3. DIALOGFLOW ---
-def detect_intent_texts(project_id, session_id, text):
-    if dialogflow is None: return None
-    try:
-        session_client = dialogflow.SessionsClient(transport="rest")
-        session = session_client.session_path(project_id, session_id)
-        text_input = dialogflow.types.TextInput(text=text, language_code="tr")
-        query_input = dialogflow.types.QueryInput(text=text_input)
-        return session_client.detect_intent(session=session, query_input=query_input).query_result
-    except:
-        return None
-
-
-# --- 4. DB FONKSİYONLARI ---
 def kargo_bilgisi_getir(no):
-    # Gelen no içindeki boşlukları temizle (Örn: "1 2 3" -> "123")
-    clean_no = str(no).replace(" ", "").strip()
+    if not no: return "Numara yok."
+    try:
+        conn = get_db_connection()
+        query = "SELECT durum_adi FROM kargo_takip JOIN hareket_cesitleri ON durum_id = id WHERE takip_no = ? OR siparis_no = ?"
+        row = conn.execute(query, (no, no)).fetchone()
+        conn.close()
+        return f"Kargo Durumu: {row['durum_adi']}" if row else "Sistemde böyle bir numara yok."
+    except:
+        return "Sorgulama yapıldı (DB Bağlı Değil), Kargonuz yolda görünüyor."
+
+
+def iade_islemi_baslat(no):
+    if not no: return "Numara belirtilmedi."
 
     conn = get_db_connection()
     try:
         query = "SELECT durum_adi FROM kargo_takip JOIN hareket_cesitleri ON durum_id = id WHERE takip_no = ? OR siparis_no = ?"
-        row = conn.execute(query, (clean_no, clean_no)).fetchone()
-        return f"Kargo Durumu: {row['durum_adi']}" if row else None
-    except:
-        return None
+        row = conn.execute(query, (no, no)).fetchone()
+
+        if not row:
+            return "Sistemde böyle bir kayıt bulunamadı."
+
+        durum = row['durum_adi']
+
+        yasakli_durumlar = ["YOLDA", "DAGITIMDA", "TRANSFER", "TESLIM"]
+
+        if any(kelime in durum for kelime in yasakli_durumlar):
+            return f"Kargonuz şu an '{durum}' aşamasındadır. Kargo yola çıktı, iade edemezsiniz. Lütfen kargonun elinize geçmesini bekleyip iade talebi oluşturun."
+
+        return f"{no} numaralı sipariş için iade talebiniz alınmıştır. İade Kodunuz, 998877."
+
+    except Exception as e:
+        return f"Veritabanı işlem hatası: {e}"
+    finally:
+        conn.close()
+
+
+def dogrulama_yap(siparis_no, ad, telefon):
+    if not siparis_no or not ad or not telefon:
+        return "DOGRULAMA_HATA|Eksik Parametre."
+
+    conn = get_db_connection()
+    try:
+        temiz_telefon = telefon.replace(" ", "").replace("-", "").strip()
+        if len(temiz_telefon) > 10 and temiz_telefon.startswith('0'):
+            temiz_telefon = temiz_telefon[1:]
+
+        if len(temiz_telefon) != 10:
+            return "DOGRULAMA_HATA|Telefon numarası formatı geçersiz (10 hane olmalı)."
+
+        validation_query = """
+            SELECT s.siparis_no, m.musteri_id
+            FROM musteriler m 
+            JOIN siparisler s ON m.musteri_id = s.musteri_id
+            JOIN kargo_takip kt ON s.siparis_no = kt.siparis_no
+            WHERE (kt.takip_no = ? OR s.siparis_no = ?)
+              AND m.telefon = ?                          
+              AND UPPER(m.ad_soyad) LIKE ?                
+        """
+
+        sql_params = (siparis_no, siparis_no, temiz_telefon, f"%{ad.upper()}%")
+        musteri_row = conn.execute(validation_query, sql_params).fetchone()
+
+        if not musteri_row:
+            return "DOGRULAMA_HATA|Bilgiler eşleşmiyor. Lütfen kontrol ediniz."
+
+        gercek_siparis_no = musteri_row['siparis_no']
+        return f"DOGRULAMA_BASARILI|{gercek_siparis_no}"
+
+    except Exception as e:
+        return f"DOGRULAMA_HATA_DB|{e}"
+    finally:
+        conn.close()
+
+
+def adres_degistir(siparis_no, ad, telefon, yeni_adres):
+    if not siparis_no or not yeni_adres:
+        return "Veri Eksikliği Hatası: Sipariş No ve Yeni Adres eksik."
+
+    conn = get_db_connection()
+    try:
+
+        update_query = """
+            UPDATE kargo_takip
+            SET teslim_adresi = ?
+            WHERE siparis_no = ?
+        """
+        conn.execute(update_query, (yeni_adres, siparis_no))
+        conn.commit()
+
+        return f" {siparis_no} numaralı siparişinizin teslimat adresi başarıyla '{yeni_adres}' olarak güncellenmiştir. Onay SMS'i gönderilmiştir."
+
+    except Exception as e:
+        conn.rollback()
+        return f"Veritabanı işlem hatası: {e}"
     finally:
         conn.close()
 
 
 def fiyat_hesapla(desi, nereye):
-    return f"{desi} desi, {nereye} için fiyat hesaplandı."
+    return f"{desi} desi, {nereye} için fiyat: 150 TL."
 
 
-# --- ROUTES ---
+# --- GEMINI ZEKASI ---
+def process_with_gemini(session_id, user_message):
+    if not genai: return "AI kapalı."
+
+    model = genai.GenerativeModel('gemini-2.5-flash')
+
+    history = chat_histories.get(session_id, [])
+
+    print(f"\n--- DEBUG BAŞLADI ---")
+    print(f"Session ID: {session_id}")
+    print(f"Mevcut Hafıza: {history}")
+    print(f"Yeni Mesaj: {user_message}")
+    # -----------------------------
+
+    system_prompt = """
+    GÖREV: Sesli Hızlı Kargo asistanısın. Müşteri temsilcisi gibi doğal ve nazik konuş.
+    ÖN İŞLEM TALİMATI: Eğer KULLANICI MESAJI sadece tek tek söylenmiş sayıları içeriyorsa, bu sayıları hemen ayıklayıp tek bir takip numarası/sipariş numarası olarak birleştir.
+
+    ÇIKTI: Sadece JSON.
+
+    ANALİZ KURALLARI (SIRAYLA UYGULA):
+
+    1. DURUM: SLOT DOLDURMA VE ADRES DEĞİŞTİRME MANTIĞI (KRİTİK!)
+       - Kullanıcı, GEÇMİŞ SOHBETTE veya mevcut mesajda "adres", "değiştirme", "yanlış adres" gibi kelimelerle adres değiştirme niyeti gösterdiyse, bu amaca odaklan.
+       - Gerekli Slotlar: ad, telefon, siparis_no, yeni_adres.
+
+       - Eğer slotlar eksikse, sırayla EKSİK OLAN İLK BİLGİYİ İSTE:
+         1. Ad eksikse: { "type": "chat", "reply": "Elbette, adres değişikliği için öncelikle siparişinizin sahibinin adını ve soyadını öğrenebilir miyim?" }
+         2. Ad dolu, Sipariş No eksikse: { "type": "chat", "reply": "Teşekkürler. Hangi siparişinizin adresini değiştireceğimizi öğrenmek için sipariş numaranızı rica edebilir miyim?" }
+         3. Ad ve Sipariş No dolu, Telefon eksikse: { "type": "chat", "reply": "Şimdi güvenlik için kayıtlı telefon numaranızı da söyler misiniz?" }
+
+         # YENİ SLOT: DOĞRULAMA ÇAĞRISI (3 bilgi dolunca aksiyon çağrılmalı)
+         4. Ad, Sipariş No ve Telefon doluysa, **ancak GEÇMİŞ SOHBETTE 'DOGRULAMA_BASARILI' yoksa**: 
+            -> { "type": "action", "function": "dogrulama_yap", "parameters": { "ad": "...", "telefon": "...", "siparis_no": "..." } }
+
+         # YENİ SLOT: ADRES SORMA (Sadece doğrulama başarılı ise sorulur)
+         5. GEÇMİŞ SOHBETTE 'DOGRULAMA_BASARILI' varsa ve Yeni Adres eksikse: 
+            -> { "type": "chat", "reply": "Doğrulama başarılı. Kargonun yeni teslimat adresi ne olacak, tam adresinizi yazar mısınız?" }
+
+       - **SON ADIM: TÜM SLOTLAR DOLUYSA AKSİYON ÇAĞIR**
+         -> { "type": "action", "function": "adres_degistir", "parameters": { "ad": "...", "telefon": "...", "siparis_no": "...", "yeni_adres": "..." } }
+
+
+    2. DURUM: BAĞLAM KONTROLÜ (Kargo ve İade)
+       - Eğer kullanıcı SADECE sayısal bir ifade girdiyse, GEÇMİŞ SOHBETİ kontrol et:
+         - Geçmişte "iade" sorulduysa -> "iade_işlemi"
+         - Geçmişte "kargom nerde" sorulduysa -> "kargo_sorgula"
+         - Diğer durumlarda -> "chat" (Soru sor)
+
+
+    3. DURUM: AÇIK EYLEMLER
+       - "Kargom nerede 12345" -> kargo_sorgula
+       - "12345 nolu siparişi iade et" -> iade_işlemi
+       - Fiyat ne kadar? -> fiyat_hesapla
+
+
+    4. DURUM: GENEL SOHBET
+       - Merhaba, teşekkürler vb. -> { "type": "chat", "reply": "..." }
+
+    CEVAP FORMATI:
+    { "type": "action", "function": "...", "parameters": { "no": "..." } }
+    VEYA
+    { "type": "chat", "reply": "..." }
+    """
+
+    formatted_history = "\n".join(history)
+    full_prompt = f"{system_prompt}\n\nGEÇMİŞ SOHBET:\n{formatted_history}\n\nKULLANICI: {user_message}\nJSON CEVAP:"
+
+    try:
+        result = model.generate_content(full_prompt)
+        text_response = result.text.replace("```json", "").replace("```", "").strip()
+        print(f"AI JSON Yanıtı: {text_response}")  # Debug
+
+        data = json.loads(text_response)
+
+        final_reply = ""
+        is_error = False
+
+        if data.get("type") == "action":
+            func = data.get("function")
+            params = data.get("parameters", {})
+
+            system_res = ""
+            if func == "kargo_sorgula":
+                system_res = kargo_bilgisi_getir(params.get("no"))
+            elif func == "iade_işlemi":
+                system_res = iade_islemi_baslat(params.get("no"))
+            elif func == "fiyat_hesapla":
+                system_res = fiyat_hesapla(params.get("desi"), params.get("nereye"))
+
+            elif func == "dogrulama_yap":
+                ad = params.get("ad")
+                telefon = params.get("telefon")
+                siparis_no = params.get("siparis_no")
+                system_res = dogrulama_yap(siparis_no, ad, telefon)
+
+                if system_res.startswith("DOGRULAMA_BASARILI"):
+                    final_prompt = f"""
+                        GÖREV: Kullanıcıya hitaben, kibar, doğal ve sadece tek bir mesaj yaz. Başka açıklama kullanma.
+                        SİSTEM BİLGİSİ: Doğrulama başarılı. Sipariş numarası hafızaya kaydedildi.
+                        Talimat: Doğrulamanın başarılı olduğunu ve şimdi yeni adresi sorması gerektiğini söyle. Cevabın SADECE yanıt metni olmalıdır.
+                        """
+                else:
+                    final_prompt = f"""
+                        GÖREV: Kullanıcıya hitaben, kibar ve özür dileyen bir mesaj yaz. Başka açıklama kullanma.
+                        SİSTEM BİLGİSİ: Bilgi Doğrulama Hatası.
+                        Talimat: Doğrulamanın başarısız olduğunu ve bilgileri kontrol etmesini iste. Cevabın SADECE yanıt metni olmalıdır.
+                        """
+                final_resp = model.generate_content(final_prompt).text
+                final_reply = final_resp.strip()
+
+            elif func == "adres_degistir":
+                siparis_no = params.get("siparis_no")
+                ad = params.get("ad")
+                telefon = params.get("telefon")
+                yeni_adres = params.get("yeni_adres")
+                system_res = adres_degistir(siparis_no, ad, telefon, yeni_adres)
+
+                if "Bilgi Doğrulama Hatası:" in system_res or "Veritabanı işlem hatası:" in system_res or "Veri Eksikliği Hatası:" in system_res:
+                    is_error = True
+
+            if func != "dogrulama_yap":
+                if is_error:
+                    final_prompt = f"""
+                            GÖREV: Kullanıcıya hitaben, kibar, **özür dileyen** ve sadece tek bir mesaj yaz. Başka hiçbir açıklama, giriş veya çıkış cümlesi kullanma.
+                            SİSTEM BİLGİSİ: {system_res}
+
+                            Talimat: Sistem bilgisini kullanıcıya nazikçe ilet. **Kesinlikle 'başarı', 'onaylandı', 'güncellendi' gibi kelimeler kullanma**. Hata nedeniyle işlemin gerçekleştirilemediğini belirt ve tekrar denemesini iste (Bilgileri kontrol etmesini söyle). Cevabın SADECE yanıt metni olmalıdır.
+                            """
+                else:
+                    final_prompt = f"""
+                            GÖREV: Kullanıcıya hitaben, kibar, doğal ve sadece tek bir mesaj yaz. Başka hiçbir açıklama, giriş veya çıkış cümlesi kullanma.
+                            SİSTEM BİLGİSİ: {system_res}
+
+                            Talimat: Sistem bilgisini kullanıcıya nazikçe ilet. Cevabın SADECE yanıt metni olmalıdır.
+                            """
+
+                final_resp = model.generate_content(final_prompt).text
+                final_reply = final_resp.strip()
+
+
+        elif data.get("type") == "chat":
+            final_reply = data.get("reply")
+
+        chat_histories.setdefault(session_id, []).append(f"KULLANICI: {user_message}")
+        chat_histories[session_id].append(f"ASİSTAN: {final_reply}")
+
+        print(f"Hafızaya Kaydedildi. Yeni Uzunluk: {len(chat_histories[session_id])}")
+        print("--- DEBUG BİTTİ ---\n")
+
+        return final_reply
+
+    except Exception as e:
+        print(f"HATA: {e}")
+        return "Bir hata oluştu."
+
+
+def metni_sese_cevir(text):
+    filename = f"ses_{uuid.uuid4().hex}.mp3"
+    try:
+        gTTS(text=text, lang='tr').save(os.path.join(AUDIO_FOLDER, filename))
+        return f"/static/{filename}"
+    except:
+        return None
+
+
 @app.route('/')
-def ana_sayfa():
-    return render_template('index.html')
+def ana_sayfa(): return render_template('index.html')
 
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
     data = request.get_json()
-    user_message = data.get('message', '').strip()
-    session_id = data.get('session_id', str(uuid.uuid4()))
+    msg = data.get('message', '')
+    sid = data.get('session_id')
+    if not sid:
+        print("UYARI: Frontend Session ID göndermedi! Hafıza çalışmaz.")
+        sid = "ozel_test_oturumu"
 
-    # Hafıza başlat
-    if session_id not in user_sessions:
-        user_sessions[session_id] = {'fail_count': 0, 'last_siparis_no': None}
-
-    try:
-        # --- YENİ EKLENEN TEMİZLİK MANTIĞI ---
-        # Kullanıcı "1 2 3" dediyse bunu "123" yapıp sayı mı diye bakalım.
-        cleaned_message = user_message.replace(" ", "")
-
-        # --- STRATEJİ 1: DİREKT SAYI KONTROLÜ (Boşluksuz Haliyle) ---
-        if cleaned_message.isdigit():
-            no = cleaned_message  # Temizlenmiş (boşluksuz) halini kullan
-            db_data = kargo_bilgisi_getir(no)
-
-            # Hafızaya da temiz halini at
-            user_sessions[session_id]['last_siparis_no'] = no
-
-            if db_data:
-                final_response = ask_gemini(user_message, db_data, is_error=False)
-                user_sessions[session_id]['fail_count'] = 0
-            else:
-                hata_mesaji = f"'{no}' numaralı bir sipariş kaydı bulunamadı."
-                final_response = ask_gemini(user_message, hata_mesaji, is_error=True)
-
-            audio_url = metni_sese_cevir(final_response)
-            return jsonify({"response": final_response, "audio": audio_url})
-
-        # --- STRATEJİ 2: SOHBET KONTROLÜ (Dialogflow) ---
-        ai_result = detect_intent_texts(PROJECT_ID, session_id, user_message)
-
-        intent_name = None
-        params = None
-        dialogflow_answer = None
-
-        if ai_result:
-            intent_name = ai_result.intent.display_name
-            params = ai_result.parameters
-            dialogflow_answer = ai_result.fulfillment_text
-
-        db_data = None
-        gemini_note = None
-
-        if intent_name == "Siparis_Sorgulama":
-            no = None
-            if params and 'siparis_no' in params.fields:
-                val = params.fields['siparis_no']
-                if val.kind == 'number_value':
-                    no = str(int(val.number_value))
-                elif val.kind == 'string_value' and val.string_value:
-                    # Gelen string'in boşluklarını sil
-                    no = val.string_value.replace(" ", "")
-
-            # Mesajda yoksa HAFIZADAN çek
-            if not no:
-                no = user_sessions[session_id].get('last_siparis_no')
-
-            if no:
-                user_sessions[session_id]['last_siparis_no'] = no
-                db_data = kargo_bilgisi_getir(no)
-
-                if db_data:
-                    user_sessions[session_id]['fail_count'] = 0
-                else:
-                    current_fails = user_sessions[session_id]['fail_count'] + 1
-                    user_sessions[session_id]['fail_count'] = current_fails
-                    if current_fails >= 3:
-                        gemini_note = "Kullanıcı 3 kez hatalı girdi. SMS/E-posta kontrol etmesini söyle."
-                        user_sessions[session_id]['fail_count'] = 0
-                    else:
-                        gemini_note = f"Kullanıcı '{no}' numarasını sordu ama veritabanında yok."
-
-        elif intent_name == "Fiyat_Sorgulama":
-            desi = params.fields.get('desi').number_value if params and params.fields.get('desi') else 1
-            sehir = params.fields.get('sehir').string_value if params and params.fields.get('sehir') else 'uzak'
-            db_data = fiyat_hesapla(desi, sehir)
-
-        # --- CEVAP OLUŞTURMA ---
-        if gemini_note:
-            final_response = ask_gemini(user_message, gemini_note, is_error=True)
-        elif db_data:
-            final_response = ask_gemini(user_message, db_data, is_error=False)
-        elif dialogflow_answer:
-            final_response = dialogflow_answer
-        else:
-            final_response = ask_gemini(user_message, None, is_error=False)
-
-        audio_url = metni_sese_cevir(final_response)
-
-        return jsonify({"response": final_response, "audio": audio_url})
-
-    except Exception as e:
-        print(f"Hata: {e}")
-        return jsonify({"response": "Bir hata oluştu.", "audio": None})
+    resp = process_with_gemini(sid, msg)
+    audio = metni_sese_cevir(resp)
+    return jsonify({"response": resp, "audio": audio, "session_id": sid})
 
 
 if __name__ == '__main__':

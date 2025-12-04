@@ -156,6 +156,19 @@
     <audio id="audioPlayer" style="display:none;"></audio>
 
     <script>
+
+        let sessionId = localStorage.getItem("chat_session_id");
+
+        // Eğer ID yoksa yeni bir tane oluşturup kaydediyoruz.
+        if (!sessionId) {
+            sessionId = "user_" + Math.random().toString(36).substring(7) + "_" + Date.now();
+            localStorage.setItem("chat_session_id", sessionId);
+            console.log("Yeni Session ID oluşturuldu:", sessionId);
+        } else {
+            console.log("Mevcut Session ID kullanılıyor:", sessionId);
+        }
+        // ----------------------------------------------
+
         const avatar = document.getElementById('avatarContainer');
         const icon = document.getElementById('statusIcon');
         const statusMsg = document.getElementById('statusMsg');
@@ -165,12 +178,12 @@
         const audioPlayer = document.getElementById('audioPlayer');
 
         let recognition;
-        let isCallActive = false; // Arama durumu
+        let isCallActive = false;
 
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
             recognition.lang = 'tr-TR';
-            recognition.continuous = false; // Cümle bitince dursun
+            recognition.continuous = false;
             recognition.interimResults = false;
 
             recognition.onstart = function() {
@@ -181,13 +194,11 @@
             recognition.onresult = function(event) {
                 const text = event.results[0][0].transcript;
                 transcriptMsg.innerText = `"${text}"`;
-
                 sendToBackend(text);
             };
 
             recognition.onend = function() {
-                // Eğer bot konuşmuyorsa ve arama aktifse, tekrar dinlemeye başlama kararı
-                // Burada beklemedeyiz, backend'den cevap gelince ses çalacak.
+                // Beklemede...
             };
 
             recognition.onerror = function(event) {
@@ -205,7 +216,6 @@
             isCallActive = true;
             startBtn.style.display = 'none';
             stopBtn.style.display = 'flex';
-
             recognition.start();
         }
 
@@ -213,27 +223,40 @@
             isCallActive = false;
             recognition.stop();
             audioPlayer.pause();
-
             startBtn.style.display = 'flex';
             stopBtn.style.display = 'none';
             setVisualState('idle');
             statusMsg.innerText = "Görüşme sonlandırıldı.";
         }
-
-
         async function sendToBackend(text) {
-            setVisualState('processing'); // Düşünüyor...
+            setVisualState('processing');
+
+            let cleanedText = text;
+
+            const numberPattern = /^[0-9\s-]+$/;
+            if (numberPattern.test(text)) {
+                cleanedText = text.replace(/\s+/g, '').replace(/-/g, '');
+                console.log("Sayısal Giriş Temizlendi:", cleanedText);
+            }
 
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
+                    body: JSON.stringify({
+                        message: cleanedText,
+                        session_id: sessionId
+                    })
                 });
 
                 const data = await response.json();
 
-                transcriptMsg.innerText = data.response; // Cevabı yaz
+                if (data.session_id && sessionId !== data.session_id) {
+                    sessionId = data.session_id;
+                    localStorage.setItem("chat_session_id", sessionId);
+                }
+
+                transcriptMsg.innerText = data.response;
 
                 if (data.audio) {
                     playResponseAudio(data.audio);
@@ -257,18 +280,15 @@
 
             audioPlayer.onended = function() {
                 if (isCallActive) {
-
                     console.log("Bot sustu, mikrofon açılıyor...");
                     try {
                         recognition.start();
                     } catch(e) {
-
                         console.log("Mikrofon zaten hazır.");
                     }
                 }
             };
         }
-
 
         function setVisualState(state) {
             avatar.classList.remove('listening', 'speaking');
@@ -292,7 +312,6 @@
                 statusMsg.innerText = "Konuşuyor...";
             }
         }
-
     </script>
 </body>
 </html>
