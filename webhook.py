@@ -3,8 +3,15 @@ import os
 import sqlite3
 import uuid
 import time
-from gtts import gTTS
 
+# --- GÜVENLİ IMPORT (gTTS) ---
+try:
+    from gtts import gTTS
+except ImportError:
+    gTTS = None
+    print("UYARI: 'gTTS' kütüphanesi bulunamadı. Sesli yanıt çalışmayacak.")
+
+# --- GÜVENLİ IMPORT (Dialogflow) ---
 try:
     from google.cloud import dialogflow_v2 as dialogflow
     from google.protobuf.struct_pb2 import Struct
@@ -18,6 +25,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'sirket_veritabani.db')
 KEY_FILE = os.path.join(BASE_DIR, 'google_key.json')
+# Ses dosyaları için klasör
 AUDIO_FOLDER = os.path.join(BASE_DIR, 'static')
 
 if not os.path.exists(AUDIO_FOLDER):
@@ -26,7 +34,9 @@ if not os.path.exists(AUDIO_FOLDER):
 if os.path.exists(KEY_FILE):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = KEY_FILE
 
+# !!! BURAYI KENDİ ID'N İLE DEĞİŞTİR !!!
 PROJECT_ID = "yardimci-musteri-jdch"
+
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
@@ -34,20 +44,28 @@ def get_db_connection():
     return conn
 
 
+# --- SES OLUŞTURMA FONKSİYONU ---
 def metni_sese_cevir(text):
     """Metni MP3 yapar, kaydeder ve URL döner."""
+    if gTTS is None:
+        print("Hata: gTTS kütüphanesi yüklü değil.")
+        return None
+
     try:
         tts = gTTS(text=text, lang='tr')
+        # Benzersiz isim verelim ki çakışmasın
         filename = f"ses_{uuid.uuid4().hex}.mp3"
         filepath = os.path.join(AUDIO_FOLDER, filename)
         tts.save(filepath)
 
+        # Frontend'in erişeceği yol
         return f"/static/{filename}"
     except Exception as e:
         print(f"TTS Hatası: {e}")
         return None
 
 
+# --- VERİTABANI FONKSİYONLARI ---
 def kargo_bilgisi_getir(no):
     conn = get_db_connection()
     try:
@@ -129,6 +147,8 @@ def detect_intent_texts(project_id, session_id, text):
     return response.query_result
 
 
+# --- ROUTES ---
+
 @app.route('/')
 def ana_sayfa():
     return render_template('index.html')
@@ -145,6 +165,7 @@ def chat_api():
     session_id = str(uuid.uuid4())
 
     try:
+        # 1. Dialogflow'a Sor
         ai_result = detect_intent_texts(PROJECT_ID, session_id, user_message)
 
         if not ai_result:
@@ -154,6 +175,7 @@ def chat_api():
         params = ai_result.parameters
         final_response = ai_result.fulfillment_text
 
+        # 2. Veritabanı İşlemleri
         if intent_name == "Siparis_Sorgulama":
             no = None
             if params and 'siparis_no' in params.fields:
@@ -180,6 +202,7 @@ def chat_api():
             if db_data:
                 final_response = trigger_dialogflow_event(PROJECT_ID, session_id, "FIYAT_HESAPLANDI", db_data)
 
+        # 3. SES OLUŞTURMA (Backend'de ses dosyası üretiliyor)
         audio_url = metni_sese_cevir(final_response)
 
         return jsonify({
