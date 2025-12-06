@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sesli Asistan Modu</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #111827;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        .avatar-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .avatar-circle {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 50px;
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .listening .avatar-circle {
+            background: linear-gradient(135deg, #10b981, #34d399);
+            box-shadow: 0 0 50px rgba(16, 185, 129, 0.6);
+            transform: scale(1.1);
+        }
+
+        .ripple {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            z-index: 1;
+        }
+
+        .listening .ripple {
+            animation: ripple-anim 2s infinite;
+        }
+        .listening .ripple:nth-child(2) { animation-delay: 0.5s; }
+        .listening .ripple:nth-child(3) { animation-delay: 1s; }
+
+        @keyframes ripple-anim {
+            0% { transform: scale(1); opacity: 0.6; border-color: #10b981; }
+            100% { transform: scale(2.5); opacity: 0; border-color: #10b981; }
+        }
+
+        .speaking .avatar-circle {
+            animation: breathe 2s infinite ease-in-out;
+            background: linear-gradient(135deg, #2563eb, #db2777);
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px #2563eb; }
+            50% { transform: scale(1.05); box-shadow: 0 0 60px #db2777; }
+        }
+
+        /* --- METİN ALANI --- */
+        .status-text {
+            font-size: 24px;
+            font-weight: 300;
+            margin-bottom: 10px;
+            min-height: 35px;
+        }
+
+        .transcript-box {
+            font-size: 16px;
+            color: #9ca3af;
+            text-align: center;
+            max-width: 80%;
+            min-height: 24px;
+            margin-bottom: 50px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+        }
+
+        .btn {
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn:active { transform: scale(0.95); }
+
+        .btn-start {
+            background-color: #10b981;
+            color: white;
+        }
+
+        .btn-stop {
+            background-color: #ef4444;
+            color: white;
+            display: none; /* Başlangıçta gizli */
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="avatar-container" id="avatarContainer">
+        <div class="ripple"></div>
+        <div class="ripple"></div>
+        <div class="ripple"></div>
+        <div class="avatar-circle">
+            <i id="statusIcon" class="fas fa-microphone-slash"></i>
+        </div>
+    </div>
+
+    <div class="status-text" id="statusMsg">Başlamak için butona bas</div>
+    <div class="transcript-box" id="transcriptMsg">...</div>
+
+    <div class="controls">
+        <button class="btn btn-start" id="startBtn" onclick="startCall()">
+            <i class="fas fa-phone-alt"></i> Aramayı Başlat
+        </button>
+        <button class="btn btn-stop" id="stopBtn" onclick="endCall()">
+            <i class="fas fa-phone-slash"></i> Kapat
+        </button>
+    </div>
+
+    <audio id="audioPlayer" style="display:none;"></audio>
+
+    <script>
+
+        let sessionId = localStorage.getItem("chat_session_id");
+
+        // Eğer ID yoksa yeni bir tane oluşturup kaydediyoruz.
+        if (!sessionId) {
+            sessionId = "user_" + Math.random().toString(36).substring(7) + "_" + Date.now();
+            localStorage.setItem("chat_session_id", sessionId);
+            console.log("Yeni Session ID oluşturuldu:", sessionId);
+        } else {
+            console.log("Mevcut Session ID kullanılıyor:", sessionId);
+        }
+        // ----------------------------------------------
+
+        const avatar = document.getElementById('avatarContainer');
+        const icon = document.getElementById('statusIcon');
+        const statusMsg = document.getElementById('statusMsg');
+        const transcriptMsg = document.getElementById('transcriptMsg');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        let recognition;
+        let isCallActive = false;
+
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.lang = 'tr-TR';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = function() {
+                if (!isCallActive) return;
+                setVisualState('listening');
+            };
+
+            recognition.onresult = function(event) {
+                const text = event.results[0][0].transcript;
+                transcriptMsg.innerText = `"${text}"`;
+                sendToBackend(text);
+            };
+
+            recognition.onend = function() {
+                // Beklemede...
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Hata:", event.error);
+                if (isCallActive && event.error !== 'no-speech') {
+                    setTimeout(() => recognition.start(), 1000);
+                }
+            };
+        } else {
+            alert("Tarayıcınız sesli asistanı desteklemiyor. Chrome kullanın.");
+        }
+
+
+        function startCall() {
+            isCallActive = true;
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
+            recognition.start();
+        }
+
+        function endCall() {
+            isCallActive = false;
+            recognition.stop();
+            audioPlayer.pause();
+            startBtn.style.display = 'flex';
+            stopBtn.style.display = 'none';
+            setVisualState('idle');
+            statusMsg.innerText = "Görüşme sonlandırıldı.";
+        }
+        async function sendToBackend(text) {
+            setVisualState('processing');
+
+            let cleanedText = text;
+
+            const numberPattern = /^[0-9\s-]+$/;
+            if (numberPattern.test(text)) {
+                cleanedText = text.replace(/\s+/g, '').replace(/-/g, '');
+                console.log("Sayısal Giriş Temizlendi:", cleanedText);
+            }
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: cleanedText,
+                        session_id: sessionId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.session_id && sessionId !== data.session_id) {
+                    sessionId = data.session_id;
+                    localStorage.setItem("chat_session_id", sessionId);
+                }
+
+                transcriptMsg.innerText = data.response;
+
+                if (data.audio) {
+                    playResponseAudio(data.audio);
+                } else {
+                    if(isCallActive) recognition.start();
+                }
+
+            } catch (error) {
+                console.error(error);
+                statusMsg.innerText = "Bağlantı hatası.";
+                if(isCallActive) setTimeout(() => recognition.start(), 2000);
+            }
+        }
+
+
+        function playResponseAudio(url) {
+            setVisualState('speaking');
+
+            audioPlayer.src = url + "?t=" + new Date().getTime();
+            audioPlayer.play();
+
+            audioPlayer.onended = function() {
+                if (isCallActive) {
+                    console.log("Bot sustu, mikrofon açılıyor...");
+                    try {
+                        recognition.start();
+                    } catch(e) {
+                        console.log("Mikrofon zaten hazır.");
+                    }
+                }
+            };
+        }
+
+        function setVisualState(state) {
+            avatar.classList.remove('listening', 'speaking');
+
+            if (state === 'idle') {
+                icon.className = "fas fa-microphone-slash";
+                statusMsg.innerText = "Hazır";
+            }
+            else if (state === 'listening') {
+                avatar.classList.add('listening');
+                icon.className = "fas fa-microphone";
+                statusMsg.innerText = "Dinliyor...";
+            }
+            else if (state === 'processing') {
+                icon.className = "fas fa-cog fa-spin";
+                statusMsg.innerText = "Düşünüyor...";
+            }
+            else if (state === 'speaking') {
+                avatar.classList.add('speaking');
+                icon.className = "fas fa-volume-up";
+                statusMsg.innerText = "Konuşuyor...";
+            }
+        }
+    </script>
+</body>
+</html>
