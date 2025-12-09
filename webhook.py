@@ -103,6 +103,120 @@ def kimlik_dogrula(siparis_no, ad, telefon):
         conn.close()
 
 
+def mesafe_hesapla_ai(cikis, varis):
+    if not cikis or not varis: return 0
+
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+
+        prompt = f"""
+        GÖREV: Aşağıdaki iki lokasyon arasındaki tahmini karayolu sürüş mesafesini kilometre (km) cinsinden ver.
+
+        Kalkış: {cikis}
+        Varış: {varis}
+
+        KURALLAR:
+        1. Sadece sayıyı ver. (Örn: 350.5)
+        2. "km", "kilometre" veya açıklama yazma. SADECE SAYI.
+        """
+        response = model.generate_content(prompt)
+        text_mesafe = response.text.strip()
+
+        import re
+        sayi = re.search(r"\d+(\.\d+)?", text_mesafe)
+        if sayi:
+            return float(sayi.group())
+        else:
+            return 0
+
+    except Exception as e:
+        print(f"Mesafe hesaplama hatası: {e}")
+        return 0
+
+
+def ucret_hesapla(cikis, varis, desi):
+    if not cikis or not varis or not desi:
+        return "Fiyat hesaplayabilmem için 'Nereden', 'Nereye' ve 'Desi' bilgisini söylemelisiniz."
+
+    try:
+        desi = float(str(desi).replace("desi", "").strip())
+    except:
+        return "Lütfen desi bilgisini sayısal olarak belirtin."
+
+    mesafe_km = mesafe_hesapla_ai(cikis, varis)
+
+    if mesafe_km == 0:
+        return f"Üzgünüm, {cikis} ile {varis} arasındaki mesafeyi hesaplayamadım."
+
+    conn = get_db_connection()
+    try:
+        tarife = conn.execute("SELECT * FROM ucretlendirme_tarife WHERE id=1").fetchone()
+
+        if not tarife: return "Veritabanında tarife bilgisi bulunamadı."
+        sinir_km = tarife['mesafe_siniri_km']
+
+        if mesafe_km > sinir_km:
+            km_birim_ucret = tarife['uzak_mesafe_km_ucret']
+            ek_desi_ucret = tarife['uzak_mesafe_ek_desi_ucret']
+        else:
+            km_birim_ucret = tarife['kisa_mesafe_km_ucret']
+            ek_desi_ucret = tarife['kisa_mesafe_ek_desi_ucret']
+
+        yol_ucreti = mesafe_km * km_birim_ucret
+
+        taban_limit = tarife['taban_desi_limiti']
+        taban_fiyat = tarife['taban_desi_ucreti']
+
+        if desi <= taban_limit:
+            paket_ucreti = taban_fiyat
+        else:
+            fark_desi = desi - taban_limit
+            paket_ucreti = taban_fiyat + (fark_desi * ek_desi_ucret)
+
+        toplam_fiyat = yol_ucreti + paket_ucreti
+
+        return float(toplam_fiyat)
+
+    except Exception as e:
+        return f"Hesaplama sırasında bir hata oluştu: {e}"
+    finally:
+        conn.close()
+
+
+def kargo_ucret_itiraz(siparis_no, fatura_no, musteri_id):
+    if not siparis_no or not fatura_no:
+        return "Sipariş No ve Fatura No gereklidir."
+
+    conn = get_db_connection()
+    try:
+        fatura_id_temiz = str(fatura_no).replace("#", "").strip()
+        fatura = conn.execute("SELECT * FROM musteri_faturalar WHERE fatura_id = ? AND siparis_no = ?",
+                              (fatura_id_temiz, siparis_no)).fetchone()
+
+        if not fatura: return "Fatura bulunamadı."
+
+        kayitli_fiyat = float(fatura['toplam_fiyat'])
+
+        hesaplanan_fiyat = ucret_hesapla(fatura['cikis_adresi'], fatura['varis_adresi'], fatura['desi'])
+
+        if isinstance(hesaplanan_fiyat, str):
+            return f"Kontrol yapılamadı: {hesaplanan_fiyat}"
+
+        fark = kayitli_fiyat - hesaplanan_fiyat
+
+        if abs(fark) < 0.5:
+            return f"İnceleme tamamlandı. Olması gereken tutar {hesaplanan_fiyat:.2f} TL. Faturanız DOĞRUDUR."
+        elif fark > 0:
+            return f"HATA TESPİT EDİLDİ! Olması gereken: {hesaplanan_fiyat:.2f} TL. Size yansıyan: {kayitli_fiyat:.2f} TL. {fark:.2f} TL iade başlatıldı."
+        else:
+            return f"İnceleme tamamlandı. Normal tutar {hesaplanan_fiyat:.2f} TL iken size {kayitli_fiyat:.2f} TL yansımış. Ek ücret talep edilmeyecektir."
+
+    except Exception as e:
+        return f"Hata: {e}"
+    finally:
+        conn.close()
+
+
 def sikayet_olustur(no, konu, musteri_id):
     if not no or not konu: return "Şikayet konusu eksik."
     safe_id = musteri_id if musteri_id else 0
@@ -288,11 +402,6 @@ def alici_adresi_degistir(no, yeni_adres):
         return f"Hata: {e}"
     finally:
         conn.close()
-
-
-def alici_adi_degistir(no, yeni_isim):
-    return f"Kargonuzun alıcı adı '{yeni_isim}' olarak güncellenmiştir. Kurye bilgilendirildi."
-
 
 def yanlis_teslimat_bildirimi(no, dogru_adres, musteri_id):
 
@@ -558,6 +667,10 @@ def process_with_gemini(session_id, user_message):
     Eğer 'DURUM: MİSAFİR KULLANICI' ise:
 
     1. --- EN YÜKSEK ÖNCELİK: GENEL SORGULAR (KİMLİK GEREKMEZ) ---
+        # FİYAT SORGULAMA (YENİ)
+       - "İstanbul'dan Ankara'ya kargo ne kadar?", "Fiyat hesapla"
+         -> {{ "type": "action", "function": "ucret_hesapla", "parameters": {{ "cikis": "...", "varis": "...", "desi": "..." }} }}
+         (Eğer eksik bilgi varsa sor).
        
        # "EN YAKIN" İFADESİ GEÇİYORSA (KRİTİK):
        - Kullanıcı "en yakın", "bana yakın" kelimelerini kullanıyorsa:
@@ -577,7 +690,7 @@ def process_with_gemini(session_id, user_message):
        - Sırayla Ad, numara ve telefon sor.
        - Ad, Numara ve Telefonun hepsi tamamsa -> 'kimlik_dogrula' çağır.
        - Sadece eksik olanı iste. 
-       - Hata varsa eşleşmeyen veriyi belirt, örneğin kargo takip numarası hatalıysa müşteriye söylediği numaranın sistemdeki eşleşmediğini söyle ve yeniden numara belirtmesini iste.
+       - Hata varsa eşleşmeyen veriyi belirt, örneğin kargo takip numarası hatalıysa müşteriye söylediği numaranın sistemdeki numarayla eşleşmediğini söyle ve yeniden numara belirtmesini iste.
        - Ad, Numara ve Telefon elimizdeyse -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "...", "no": "...", "telefon": "..." }} }}
           
     --- SENARYO 2: KULLANICI DOĞRULANMIŞ İSE (GİRİŞ YAPILDI) ---
@@ -613,12 +726,6 @@ def process_with_gemini(session_id, user_message):
        - "Kargom kırık geldi", "Paket ezilmiş", "Ürün hasarlı", "Islanmış", "Parçalanmış":
          - EĞER hasar tipi belliyse -> {{ "type": "action", "function": "hasar_kaydi_olustur", "parameters": {{ "no": "{saved_no}", "hasar_tipi": "..." }} }}
          - EĞER tip belli değilse -> {{ "type": "chat", "reply": "Çok üzgünüz. Hasarın türü nedir? (Kırık, Ezik, Islak, Kayıp)" }}
-         
-       # ALICI ADI DEĞİŞTİRME
-       - "Alıcı adını değiştirmek istiyorum", "Alıcının adını yanlış girmişim" (Yeni isim yoksa):
-         -> {{ "type": "chat", "reply": "Tabii, kargoyu teslim alacak yeni kişinin Adı ve Soyadı nedir?" }}
-       - Yeni isim belliyse:
-         -> {{ "type": "action", "function": "alici_adi_degistir", "parameters": {{ "no": "{saved_no}", "yeni_isim": "..." }} }}
 
        # KENDİ ADRESİNİ DEĞİŞTİRME (Gelen Kargo)
        - "Adresimi değiştirmek istiyorum", "Kapı numarasını yanlış yazmışım", "Sadece sokağı düzelt", "İlçe yanlış olmuş":
@@ -634,6 +741,9 @@ def process_with_gemini(session_id, user_message):
          - EĞER kullanıcı SADECE DÜZELTME istediyse ("Sadece apartman adını düzelt", "Sokak yanlış", "Daire no hatalı"):
            -> {{ "type": "chat", "reply": "Karışıklık olmaması için lütfen alıcının güncel ve TAM adresini (Mahalle, Sokak, No, İlçe) söyler misiniz?" }}
     
+       # FATURA İTİRAZI
+       - "Faturam yanlış", "İtiraz ediyorum" -> kargo_ucret_itiraz (Fatura No iste).
+       
     4. GENEL SOHBET:
        - Merhaba, nasılsın vb. -> {{ "type": "chat", "reply": "..." }}
     """
@@ -680,6 +790,16 @@ def process_with_gemini(session_id, user_message):
                     final_prompt = f"Kullanıcıya bilgilerin eşleşmediğini söyle ve tekrar denemesini iste. SADECE yanıt metni."
                 system_res = res
 
+            elif func == "ucret_hesapla":
+                raw_result = ucret_hesapla(params.get("cikis"), params.get("varis"), params.get("desi"))
+
+                if isinstance(raw_result, (int, float)):
+                    system_res = f"{params.get('cikis')} ile {params.get('varis')} şehirleri arası {params.get('desi')} desilik paketinizin ücreti tahmini {raw_result:.2f} Türk Lirasıdır."
+                else:
+                    system_res = raw_result
+
+            elif func == "kargo_ucret_itiraz":
+                system_res = kargo_ucret_itiraz(saved_no, params.get("fatura_no"), user_id)
             elif func == "yanlis_teslimat_bildirimi":
                 if not params.get("dogru_adres"):
                     final_reply = "Anladım, bir karışıklık olmuş. Kargonun aslında hangi adrese teslim edilmesi gerekiyordu?"
@@ -710,9 +830,6 @@ def process_with_gemini(session_id, user_message):
                 system_res = adres_degistir(params.get("no"), params.get("yeni_adres"))
             elif func == "alici_adresi_degistir":
                 system_res = alici_adresi_degistir(params.get("no"), params.get("yeni_adres"))
-            elif func == "alici_adi_degistir":
-                system_res = alici_adi_degistir(params.get("no"), params.get("yeni_isim"))
-
             if func != "kimlik_dogrula":
                 final_prompt = f"Kullanıcıya şu sistem bilgisini nazikçe ilet: {system_res}. SADECE yanıt metni."
 
