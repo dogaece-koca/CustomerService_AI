@@ -3,7 +3,7 @@ import os
 import sqlite3
 import uuid
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from gtts import gTTS
 from dotenv import load_dotenv
 
@@ -438,6 +438,175 @@ def yanlis_teslimat_bildirimi(no, dogru_adres, musteri_id):
         conn.close()
 
 
+def kargo_durum_destek(takip_no, musteri_id):
+    if not takip_no: return "İşlem yapabilmem için takip numarası gerekli."
+
+    conn = get_db_connection()
+    try:
+        query = """
+            SELECT 
+                h.islem_tarihi, 
+                h.islem_yeri, 
+                h.aciklama,
+                s.sube_adi as hedef_sube,
+                s.telefon as hedef_tel
+            FROM kargo_hareketleri h
+            LEFT JOIN subeler s ON h.hedef_sube_id = s.sube_id
+            WHERE h.takip_no = ? 
+            ORDER BY h.islem_tarihi DESC 
+            LIMIT 1
+        """
+        row = conn.execute(query, (takip_no,)).fetchall()
+
+        if not row:
+            return "Bu kargo için henüz sisteme girilmiş bir hareket yok."
+
+        kayit = row[0]
+
+        son_yer = kayit['islem_yeri']
+        durum = kayit['aciklama']
+        tarih = kayit['islem_tarihi']
+        hedef_sube = kayit['hedef_sube']
+        hedef_tel = kayit['hedef_tel']
+
+        cevap = (f"Kargo Durumu:Kargonuz en son {tarih} tarihinde {son_yer} konumunda işlem görmüştür.\n"
+                 f"Son İşlem: {durum}\n\n")
+
+        if hedef_tel:
+            cevap += (f"Kargonuzun teslim edileceği birim {hedef_sube}'dir.\n"
+                      f"Gecikme veya detaylı bilgi için doğrudan varış şubemizi arayabilirsiniz:\n"
+                      f"{hedef_sube} Telefonu:{hedef_tel}")
+        else:
+            cevap += "Hedef şube iletişim bilgisine şu an ulaşılamıyor."
+
+        return cevap
+
+    except Exception as e:
+        return f"Hata: {e}"
+    finally:
+        conn.close()
+
+def fatura_bilgisi_gonderici(siparis_no, musteri_id):
+    if not siparis_no or not musteri_id:
+        return "Fatura bilgisi için sipariş numarası ve kullanıcı doğrulaması gereklidir."
+
+    conn = get_db_connection()
+    try:
+        query = """
+            SELECT * FROM musteri_faturalar 
+            WHERE siparis_no = ? AND musteri_id = ?
+        """
+        fatura = conn.execute(query, (siparis_no, musteri_id)).fetchone()
+
+        if not fatura:
+            return "Bu siparişe ait sizin adınıza kesilmiş bir fatura bulunamadı. (Sadece gönderici fatura detayını görebilir)."
+
+        tarih = fatura['hesaplama_tarihi']
+        tutar = fatura['toplam_fiyat']
+        mesafe = fatura['mesafe_km']
+        desi = fatura['desi']
+        cikis = fatura['cikis_adresi']
+        varis = fatura['varis_adresi']
+
+        return (f"Fatura Detayı:\n"
+                f"- Tarih: {tarih}\n"
+                f"- Güzergah: {cikis} -> {varis} ({mesafe} km)\n"
+                f"- Paket: {desi} Desi\n"
+                f"- Toplam Tutar: {tutar} TL\n"
+                f"Faturanız sistemimizde kayıtlıdır.")
+
+    except Exception as e:
+        return f"Fatura sorgulama hatası: {e}"
+    finally:
+        conn.close()
+
+def evde_olmama_bildirimi(takip_no):
+    if not takip_no:
+        return "İşlem yapabilmem için kargo takip numarasını belirtmelisiniz."
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT durum_id, tahmini_teslim FROM kargo_takip WHERE takip_no = ?", (takip_no,))
+    kargo = cursor.fetchone()
+
+    if not kargo:
+        conn.close()
+        return f"{takip_no} numaralı bir kargo bulunamadı."
+
+    durum_id = kargo[0]
+    eski_tarih = kargo[1]
+
+    if durum_id == 4:
+        conn.close()
+        return f"{takip_no} numaralı kargo zaten TESLİM EDİLMİŞ, tarih değişikliği yapılamaz."
+
+    bugun = datetime.now()
+    yeni_tarih_obj = bugun + timedelta(days=2)
+    yeni_tarih_str = yeni_tarih_obj.strftime('%Y-%m-%d')
+
+    try:
+        cursor.execute('''
+            UPDATE kargo_takip 
+            SET tahmini_teslim = ? 
+            WHERE takip_no = ?
+        ''', (yeni_tarih_str, takip_no))
+        conn.commit()
+        mesaj = (f"{takip_no} numaralı kargonuz için 'Evde Yokum' bildirimi alındı.\n"
+                 f"Eski Tarih: {eski_tarih} -> Yeni Teslim Tarihi: {yeni_tarih_str} olarak güncellenmiştir.\n"
+                 f"En yakın şubeden de teslim alabilirsiniz.")
+    except Exception as e:
+        mesaj = f"Bir hata oluştu: {e}"
+    finally:
+        conn.close()
+
+    return mesaj
+
+
+def supervizor_talebi(ad, telefon):
+    if not ad or not telefon:
+        return "Yetkilimizin size ulaşabilmesi için lütfen Ad-Soyad ve Telefon numaranızı belirtin."
+
+    conn = get_db_connection()
+    try:
+        tel_temiz = telefon.replace(" ", "").replace("-", "").replace("(", "").replace(")", "").strip()
+        if len(tel_temiz) > 10 and tel_temiz.startswith('0'):
+            tel_temiz = tel_temiz[1:]
+
+        musteri_id = 0
+
+        row = conn.execute("SELECT musteri_id, ad_soyad FROM musteriler WHERE telefon = ?", (tel_temiz,)).fetchone()
+
+        if row:
+            db_ad = metin_temizle(row['ad_soyad'])
+            girilen_ad = metin_temizle(ad)
+
+            if girilen_ad in db_ad or db_ad in girilen_ad:
+                musteri_id = row['musteri_id']
+                print(f"DEBUG: Müşteri bulundu ID: {musteri_id}")
+
+        su_an = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO supervisor_gorusmeleri (musteri_id, girilen_ad, girilen_telefon, talep_tarihi) 
+            VALUES (?, ?, ?, ?)
+        ''', (musteri_id, ad, tel_temiz, su_an))
+
+        conn.commit()
+        talep_no = cursor.lastrowid
+
+        return (f"Teşekkürler {ad}. Talebiniz alınmıştır (Talep No: #{talep_no}). "
+                f"Supervisor ekibimiz {tel_temiz} numarasından en kısa sürede size dönüş yapacaktır.")
+
+    except Exception as e:
+        print(f"Supervisor Hatası: {e}")
+        return "Sistemsel bir hata oluştu, lütfen daha sonra tekrar deneyin."
+
+    finally:
+        conn.close()
+
+
 def sube_sorgula(lokasyon):
     conn = get_db_connection()
     try:
@@ -684,8 +853,15 @@ def process_with_gemini(session_id, user_message):
        - "Kaça kadar açıksınız?", "Pazar açık mı?" -> {{ "type": "action", "function": "sube_saat_sorgula", "parameters": {{ "lokasyon": "..." }} }}
        - "Telefon numaranız ne?" -> {{ "type": "action", "function": "sube_telefon_sorgula", "parameters": {{ "lokasyon": "..." }} }}
 
+       # SÜPERVİZÖR / CANLI DESTEK (ÖZEL İSTİSNA - SADECE AD VE TELEFON YETERLİ) [YENİ]
+       - "Yetkiliyle görüşmek istiyorum", "Süpervizör", "İnsana bağla", "Müşteri temsilcisi":
+         - Bu işlem için TAKİP NUMARASI GEREKMEZ.
+         - Sırasıyla SADECE Ad Soyad ve Telefon iste. Önce ad -> sonra telefon.
+         - Bilgiler (Geçmiş sohbet dahil) tamamsa -> {{ "type": "action", "function": "supervizor_talebi", "parameters": {{ "ad": "...", "telefon": "..." }} }}
+         - Eksikse sadece Ad veya Telefon iste
+         
     2. --- İKİNCİ ÖNCELİK: KİMLİK DOĞRULAMA (KİŞİSEL İŞLEMLER İÇİN) ---
-       Eğer kullanıcı yukarıdaki genel sorular dışında bir şey soruyorsa (Kargo nerede, iptal, şikayet vb.):
+       Eğer kullanıcı yukarıdaki genel sorular dışında bir şey soruyorsa (Kargo nerede, iptal, şikayet vb.) veya süpervizörle görüşme talebi belirtmiyorsa:
        - Kullanıcı parça parça bilgi veriyorsa (Önce isim, sonra numara gibi), GEÇMİŞ SOHBETTEKİ parçaları birleştir.
        - Sırayla Ad, numara ve telefon sor.
        - Ad, Numara ve Telefonun hepsi tamamsa -> 'kimlik_dogrula' çağır.
@@ -741,10 +917,22 @@ def process_with_gemini(session_id, user_message):
          - EĞER kullanıcı SADECE DÜZELTME istediyse ("Sadece apartman adını düzelt", "Sokak yanlış", "Daire no hatalı"):
            -> {{ "type": "chat", "reply": "Karışıklık olmaması için lütfen alıcının güncel ve TAM adresini (Mahalle, Sokak, No, İlçe) söyler misiniz?" }}
     
+       # GECİKEN / HAREKETSİZ KARGO
+       - "Kargom günlerdir aynı yerde", "Neden ilerlemiyor?", "Transferde takıldı", "Ne oldu kargoma?":
+         -> {{ "type": "action", "function": "kargo_durum_destek", "parameters": {{ "takip_no": "{saved_no}", "musteri_id": "{user_id}" }} }}
+         
        # FATURA İTİRAZI
        - "Faturam yanlış", "İtiraz ediyorum" -> kargo_ucret_itiraz (Fatura No iste).
        
-    4. GENEL SOHBET:
+       # FATURA BİLGİSİ SORGULAMA (GÖNDERİCİ)
+       - "Faturamın durumunu öğrenmek istiyorum. ","Ne kadar ödemiştim?", "Fatura detayı nedir?", "Faturamı göster", "Kargo ücretim ne kadardı?":
+         -> {{ "type": "action", "function": "fatura_bilgisi_gonderici", "parameters": {{ "no": "{saved_no}" }} }}
+         
+       # TESLİMAT ERTELEME (EVDE YOKUM BİLDİRİMİ)
+       - "Evde yokum", "Evde olamayacağım", "Bugün teslim almayacağım", "Kargoyu sonra getirin", "Teslimatı ertele":
+         -> {{ "type": "action", "function": "evde_olmama_bildirimi", "parameters": {{ "no": "{saved_no}" }} }}
+      
+    3. GENEL SOHBET:
        - Merhaba, nasılsın vb. -> {{ "type": "chat", "reply": "..." }}
     """
 
@@ -830,6 +1018,14 @@ def process_with_gemini(session_id, user_message):
                 system_res = adres_degistir(params.get("no"), params.get("yeni_adres"))
             elif func == "alici_adresi_degistir":
                 system_res = alici_adresi_degistir(params.get("no"), params.get("yeni_adres"))
+            elif func == "kargo_durum_destek":
+                system_res = kargo_durum_destek(saved_no, user_id)
+            elif func == "fatura_bilgisi_gonderici":
+                system_res = fatura_bilgisi_gonderici(params.get("no"), user_id)
+            elif func == "evde_olmama_bildirimi":
+                system_res = evde_olmama_bildirimi(params.get("no"))
+            elif func == "supervizor_talebi":
+                system_res = supervizor_talebi(params.get("ad"), params.get("telefon"))
             if func != "kimlik_dogrula":
                 final_prompt = f"Kullanıcıya şu sistem bilgisini nazikçe ilet: {system_res}. SADECE yanıt metni."
 

@@ -232,9 +232,53 @@ def create_simulation_db():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', faturalar)
 
+    # 12. KARGO HAREKETLERİ (GÜNCEL)
+    cursor.execute('''
+            CREATE TABLE kargo_hareketleri (
+                hareket_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                takip_no TEXT,
+                islem_tarihi DATETIME,
+                islem_yeri TEXT,
+                islem_tipi TEXT,
+                aciklama TEXT,
+                hedef_sube_id INTEGER, -- subeler tablosundaki ID ile eşleşmeli
+                FOREIGN KEY(takip_no) REFERENCES kargo_takip(takip_no),
+                FOREIGN KEY(hedef_sube_id) REFERENCES subeler(sube_id)
+            )
+        ''')
+
+    # Senaryo: Kargo İstanbul'dan çıkıp İzmir Alsancak Şubesi'ne (ID: 4) gidiyor.
+    hareketler = [
+        ('123456', '2025-12-08 09:00', 'Kadıköy Şube', 'Kabul', 'Kargo şubeden kabul edildi.', 4),
+        ('123456', '2025-12-08 14:30', 'Kadıköy Şube', 'Transfer', 'Transfer aracına yüklendi.', 4),
+        ('123456', '2025-12-08 17:00', 'Tuzla Aktarma Merkezi', 'Giriş', 'Aktarma merkezine ulaştı.', 4),
+        ('123456', '2025-12-09 08:30', 'Tuzla Aktarma Merkezi', 'Çıkış', 'İzmir aracına yüklendi.', 4),
+        ('123456', '2025-12-09 14:00', 'Manisa Aktarma', 'Giriş', 'Bölge aktarmaya ulaştı.', 4),
+        # SON DURUM: Gerçek bir şubeye (Alsancak - ID:4) varış
+        ('123456', '2025-12-10 09:00', 'Alsancak Şube', 'Varış', 'Varış şubesine ulaştı, dağıtıma hazırlanıyor.', 4)
+    ]
+
+    cursor.executemany('''
+            INSERT INTO kargo_hareketleri 
+            (takip_no, islem_tarihi, islem_yeri, islem_tipi, aciklama, hedef_sube_id) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', hareketler)
+
+    # 13. SUPERVISOR GÖRÜŞME TALEPLERİ (Basitleştirilmiş)
+    cursor.execute('''
+                CREATE TABLE IF NOT EXISTS supervisor_gorusmeleri (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                musteri_id INTEGER,
+                girilen_ad TEXT,
+                girilen_telefon TEXT,
+                talep_tarihi DATETIME,
+                durum TEXT DEFAULT 'BEKLIYOR'
+                )
+            ''')
+
     conn.commit()
     conn.close()
-    print("✅ Veritabanı KURYE ve YENİ TABLO YAPISIYLA güncellendi!")
+    print("✅ Veritabanı KARGO HAREKETLERİ (Gerçek Şube Bağlantılı) ile güncellendi!")
 
 if __name__ == "__main__":
     create_simulation_db()
