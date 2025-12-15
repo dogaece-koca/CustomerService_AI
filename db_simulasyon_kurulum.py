@@ -167,11 +167,7 @@ def create_simulation_db():
     ''')
 
     # ---------------------------------------------------------
-<<<<<<< HEAD
-    # 9. HASAR BİLDİRİMLERİ
-=======
     # 9. HASAR BİLDİRİMLERİ (E2 için DEFAULT eklendi)
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
     # ---------------------------------------------------------
     cursor.execute('''
         CREATE TABLE hasar_bildirimleri (
@@ -179,11 +175,7 @@ def create_simulation_db():
             siparis_no TEXT,
             olusturan_musteri_id INTEGER,
             hasar_tipi TEXT,
-<<<<<<< HEAD
-            tazminat_durumu TEXT DEFAULT 'INCELEMEDE',
-=======
             tazminat_durumu TEXT DEFAULT 'INCELEMEDE', -- E2 için düzeltildi
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
             tarih DATE,
             FOREIGN KEY(siparis_no) REFERENCES siparisler(siparis_no)
         )
@@ -211,11 +203,7 @@ def create_simulation_db():
     ''')
 
     # ---------------------------------------------------------
-<<<<<<< HEAD
-    # 13. KAMPANYALAR TABLOSU (YENİ)
-=======
     # 13. KAMPANYALAR TABLOSU
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
     # ---------------------------------------------------------
     cursor.execute('''
         CREATE TABLE kampanyalar (
@@ -280,23 +268,16 @@ def create_simulation_db():
         )
     ''')
 
-<<<<<<< HEAD
-=======
     # Not: Alsancak Şube'nin ID'si, Şubeler tablosunda 4'tür.
     # Sipariş 123456'nın son hedefi Alsancak Şube'dir (hedef_sube_id: 4).
     # Alsancak Şube'nin telefonu (0232 555 66 77) bu ID üzerinden çekilmelidir.
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
     hareketler = [
         ('123456', '2025-12-08 09:00', 'Kadıköy Şube', 'Kabul', 'Kargo şubeden kabul edildi.', 4),
         ('123456', '2025-12-08 14:30', 'Kadıköy Şube', 'Transfer', 'Transfer aracına yüklendi.', 4),
         ('123456', '2025-12-08 17:00', 'Tuzla Aktarma Merkezi', 'Giriş', 'Aktarma merkezine ulaştı.', 4),
         ('123456', '2025-12-09 08:30', 'Tuzla Aktarma Merkezi', 'Çıkış', 'İzmir aracına yüklendi.', 4),
         ('123456', '2025-12-09 14:00', 'Manisa Aktarma', 'Giriş', 'Bölge aktarmaya ulaştı.', 4),
-<<<<<<< HEAD
-        ('123456', '2025-12-10 09:00', 'Alsancak Şube', 'Varış', 'Varış şubesine ulaştı, dağıtıma hazırlanıyor.', 4)
-=======
         ('123456', '2025-12-10 09:00', 'Alsancak Şube', 'Varış', 'Varış şubesine ulaştı, dağıtıma hazırlanıyor.', 4) # Hedef şube ID'si Alsancak için 4
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
     ]
 
     cursor.executemany('''
@@ -306,11 +287,7 @@ def create_simulation_db():
     ''', hareketler)
 
     # ---------------------------------------------------------
-<<<<<<< HEAD
-    # 13. SUPERVISOR GÖRÜŞME TALEPLERİ (YENİ TABLO)
-=======
     # 13. SUPERVISOR GÖRÜŞME TALEPLERİ
->>>>>>> fea5b74 (B C E teslerinde yaşanan sorunlar çözüldü)
     # ---------------------------------------------------------
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS supervisor_gorusmeleri (
