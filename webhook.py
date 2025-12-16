@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+from ml_modulu import duygu_analizi_yap, teslimat_suresi_hesapla
 import os
 import sqlite3
 import uuid
@@ -53,9 +54,7 @@ def metin_temizle(text):
     return text.strip()
 
 
-# Satır ~78
 def vergi_hesapla_ai(urun_kategorisi, fiyat, hedef_ulke):
-    """Veritabanı olmadan Gemini ile gümrük vergisi hesaplar."""
     if not genai: return "AI servisi kapalı."
 
     try:
@@ -1109,7 +1108,6 @@ def supervizor_talebi(ad, telefon):
         conn.close()
 
 # --- GEMINI ZEKASI ---
-# Satır ~838
 def process_with_gemini(session_id, user_message):
     if not genai: return "AI kapalı."
 
@@ -1143,17 +1141,29 @@ def process_with_gemini(session_id, user_message):
         # AI'ya hem son mesajı hem de bağlamı zorla iletiyoruz.
         final_user_message = f"{user_message} (NOT: Kullanıcı daha önce '{pending_intent}' yapmak istediğini belirtti ve parça parça bilgi veriyor. Eksikleri tamamladıysa doğrulama yap. Geçmiş: {formatted_history_for_context})"
 
+    duygu_durumu, duygu_skoru = duygu_analizi_yap(user_message)
+    print(f"[NLP ANALİZİ] Müşteri Duygusu: {duygu_durumu} (Skor: {duygu_skoru})")
+
+    duygu_notu = ""
+    if "KIZGIN" in duygu_durumu:
+        duygu_notu = "DİKKAT: Müşteri şu an ÖFKELİ görünüyor. Cevabında mutlaka alttan al, çok nazik ol, özür dile ve çözüm odaklı konuş. Asla tartışmaya girme."
+    elif "MUTLU" in duygu_durumu:
+        duygu_notu = "İPUCU: Müşteri MEMNUN görünüyor. Enerjik ve samimi bir dille teşekkür et."
+
     system_prompt = f"""
     GÖREV: Hızlı Kargo sesli asistanısın. {status_prompt}
+    
+    !!! KRİTİK DUYGU DURUMU ANALİZİ !!!
+    {duygu_notu}
 
-ÖN İŞLEM: Tek tek söylenen sayıları birleştir (bir iki üç -> 123).
-ÇIKTI: SADECE JSON.
+    ÖN İŞLEM: Tek tek söylenen sayıları birleştir (bir iki üç -> 123).
+    ÇIKTI: SADECE JSON.
 
     ANALİZ KURALLARI VE ÖNCELİKLERİ:
 
     --- SENARYO 1: GENEL SORGULAR (MİSAFİR DE YAPABİLİR) ---
 
-1. --- EN YÜKSEK ÖNCELİK: GENEL SORGULAR (KİMLİK GEREKMEZ) ---
+    1. --- EN YÜKSEK ÖNCELİK: GENEL SORGULAR (KİMLİK GEREKMEZ) ---
 
     # KAMPANYA SORGULAMA (YÜKSEK ÖNCELİK VE GÜÇLÜ KURAL)
     - "Öğrenci indirimi var mı?", "Kampanyalarınız neler?", "Bana özel plan var mı?", "İndirim", "kampanya", "fırsat", "özel teklif", "öğrenci", "plan" kelimelerinden HERHANGİ BİRİ GEÇİYORSA VEYA SORULUYORSA İLK ÖNCE BU KURALI ÇALIŞTIR.
@@ -1163,6 +1173,11 @@ def process_with_gemini(session_id, user_message):
     - "İstanbul'dan Ankara'ya kargo ne kadar?", "Fiyat hesapla"
       -> {{ "type": "action", "function": "ucret_hesapla", "parameters": {{ "cikis": "...", "varis": "...", "desi": "..." }} }}
       (Eğer eksik bilgi varsa sor).
+      
+    # TESLİMAT SÜRESİ TAHMİNİ
+    - "Kargo kaç günde gider?", "İzmir İstanbul arası ne kadar sürer?", "Tahmini varış süresi hesapla", "Teslimat kaç gün sürer?":
+      -> {{ "type": "action", "function": "teslimat_suresi_hesapla_ai", "parameters": {{ "cikis": "...", "varis": "...", "desi": "..." }} }}
+      (Not: Eğer kullanıcı desi belirtmediyse varsayılan olarak '5' kabul et).
 
     # "EN YAKIN" İFADESİ GEÇİYORSA (KRİTİK):
     - Kullanıcı "en yakın", "bana yakın" kelimelerini kullanıyorsa:
@@ -1183,7 +1198,7 @@ def process_with_gemini(session_id, user_message):
       - Bilgiler (Geçmiş sohbet dahil) tamamsa -> {{ "type": "action", "function": "supervizor_talebi", "parameters": {{ "ad": "...", "telefon": "..." }} }}
       - Eksikse sadece Ad veya Telefon iste
 
-2. --- İKİNCİ ÖNCELİK: KİMLİK DOĞRULAMA (KİŞİSEL İŞLEMLER İÇİN) ---
+    2. --- İKİNCİ ÖNCELİK: KİMLİK DOĞRULAMA (KİŞİSEL İŞLEMLER İÇİN) ---
     Eğer kullanıcı yukarıdaki genel sorular dışında bir şey soruyorsa (Kargo nerede, iptal, şikayet vb.) veya süpervizörle görüşme talebi belirtmiyorsa:
     - Kullanıcı parça parça bilgi veriyorsa (Önce isim, sonra numara gibi), GEÇMİŞ SOHBETTEKİ parçaları birleştir.
     - Sırayla Ad, numara ve telefon sor.
@@ -1192,11 +1207,11 @@ def process_with_gemini(session_id, user_message):
     - Hata varsa eşleşmeyen veriyi belirt, örneğin kargo takip numarası hatalıysa müşteriye söylediği numaranın sistemdeki numarayla eşleşmediğini söyle ve yeniden numara belirtmesini iste.
     - Ad, Numara ve Telefon elimizdeyse -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "...", "no": "...", "telefon": "..." }} }}
 
---- SENARYO 2: KULLANICI DOĞRULANMIŞ İSE (GİRİŞ YAPILDI) ---
-Eğer 'DURUM: KULLANICI DOĞRULANDI' ise:
-1. Hafızadaki '{{saved_no}}' numarasını kullan.
+    --- SENARYO 2: KULLANICI DOĞRULANMIŞ İSE (GİRİŞ YAPILDI) ---
+    Eğer 'DURUM: KULLANICI DOĞRULANDI' ise:
+    1. Hafızadaki '{{saved_no}}' numarasını kullan.
 
-2. İŞLEMLER:
+    2. İŞLEMLER:
     # "Kargom nerede?" -> {{ "type": "action", "function": "kargo_sorgula", "parameters": {{ "no": "{saved_no}" }} }}
 
     # "Yanlış adrese gitti", "Kargom başka yere teslim edildi", "Ben oraya yollamadım" (YANLIŞ TESLİMAT):
@@ -1457,6 +1472,25 @@ Eğer 'DURUM: KULLANICI DOĞRULANDI' ise:
                 system_res = yurt_disi_kargo_kosul()
             elif func == "bildirim_ayari_degistir":
                 system_res = bildirim_ayari_degistir(params.get("tip"), user_id)
+            elif func == "teslimat_suresi_hesapla_ai":
+                cikis = params.get("cikis")
+                varis = params.get("varis")
+                desi = params.get("desi", 5)
+
+                if not cikis or not varis:
+                    system_res = "Teslimat süresi hesaplayabilmem için lütfen Çıkış ve Varış şehirlerini belirtin."
+                else:
+                    mesafe = mesafe_hesapla_ai(cikis, varis)
+
+                    if mesafe > 0:
+
+                        sure = teslimat_suresi_hesapla(mesafe, desi)
+
+                        system_res = (f"Geçmiş taşıma verilerimize dayanarak yaptığım analize göre, "
+                                      f"{cikis} ile {varis} arasındaki gönderimlerin ortalama {sure} gün sürdüğünü görüyorum. "
+                                      f"Mesafe yaklaşık {int(mesafe)} kilometre.")
+                    else:
+                        system_res = "Şehirler arası mesafe hesaplanamadı, lütfen tekrar deneyin."
 
             if func != "kimlik_dogrula" and func != "kampanya_sorgula" and func != "vergi_hesapla_ai":
                 # H2 ÇÖZÜMÜ: system_res'in boş dönmesi engellendi, onay mesajları direkt kullanılıyor.
