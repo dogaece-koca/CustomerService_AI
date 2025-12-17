@@ -6,12 +6,11 @@ from sklearn.naive_bayes import MultinomialNB
 
 def teslimat_suresi_hesapla(mesafe, agirlik):
     try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))  # modules klasörü
-        base_dir = os.path.dirname(current_dir)  # Ana proje klasörü
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.dirname(current_dir)
 
         csv_path = os.path.join(base_dir, 'teslimat_verisi.csv')
 
-        # Hata Ayıklama İçin: Konsola aradığı yolu yazdıralım
         print(f"🔍 ML Modülü CSV Arıyor: {csv_path}")
 
         if not os.path.exists(csv_path):
@@ -50,27 +49,22 @@ def duygu_analizi_yap(gelen_cumle):
         SUTUN_YORUM = 'text'
         SUTUN_ETIKET = 'label'
 
-        # 1. DOSYAYI BUL
         current_dir = os.path.dirname(os.path.abspath(__file__))
         base_dir = os.path.dirname(current_dir)
         csv_path = os.path.join(base_dir, CSV_DOSYA_ADI)
 
         if not os.path.exists(csv_path):
-            print(f"ML UYARI: '{CSV_DOSYA_ADI}' dosyası bulunamadı.")
-            return "NÖTR (Veri Yok)", 0
+            return "NÖTR (Dosya Yok)", 0
 
-        # 2. VERİYİ OKU
         try:
             df = pd.read_csv(csv_path, encoding='utf-8')
         except:
-            # Türkçe karakter sorunu olursa diye
             df = pd.read_csv(csv_path, encoding='utf-16')
 
-            # 3. VERİ TEMİZLİĞİ
         df = df.dropna(subset=[SUTUN_YORUM, SUTUN_ETIKET])
         df[SUTUN_YORUM] = df[SUTUN_YORUM].astype(str)
 
-        # 4. MODELİ EĞİT
+        # Vectorizer ayarları (Küçük harf duyarlılığı vs.)
         vectorizer = CountVectorizer()
         X = vectorizer.fit_transform(df[SUTUN_YORUM])
         y = df[SUTUN_ETIKET]
@@ -78,19 +72,38 @@ def duygu_analizi_yap(gelen_cumle):
         clf = MultinomialNB()
         clf.fit(X, y)
 
-        # 5. TAHMİN YAP
-        tahmin = clf.predict(vectorizer.transform([gelen_cumle]))[0]
-        sonuc_str = str(tahmin)  # Büyük/küçük harf duyarlılığı için string yapalım
+        # --- DÜZELTME BAŞLANGICI ---
 
-        # --- YENİ VERİ SETİNE GÖRE ETİKET KONTROLÜ ---
-        # Senin veri setinde: "Olumlu", "Olumsuz", "Tarafsız" yazıyor.
+        # 1. ADIM: Gelen cümleyi vektöre çevir
+        gelen_vektor = vectorizer.transform([gelen_cumle])
+
+        # KONTROL 1: HİÇBİR KELİME EŞLEŞTİ Mİ?
+        # Eğer kullanıcının yazdığı kelimelerin hiçbiri veri setinde yoksa (nnz = number of non-zero elements)
+        # Modelin rastgele (veya çoğunluk sınıfına göre) atmasina izin verme, NÖTR dön.
+        if gelen_vektor.nnz == 0:
+            return "NÖTR (Tanımsız Kelime)", 0
+
+        # 2. ADIM: Sadece tahmin değil, olasılıkları da al
+        # classes_ modelin tanıdığı sınıfları (örn: ['Negatif', 'Olumlu', 'Tarafsız']) tutar
+        olasiliklar = clf.predict_proba(gelen_vektor)[0]
+        max_olasilik = np.max(olasiliklar)  # En yüksek güven skoru (örn: 0.45 veya 0.90)
+        tahmin_index = np.argmax(olasiliklar)
+        tahmin = clf.classes_[tahmin_index]
+
+        sonuc_str = str(tahmin)
+
+        # KONTROL 2: GÜVEN EŞİĞİ (THRESHOLD)
+        # Eğer model %60'tan az eminse, risk alma NÖTR de.
+        if max_olasilik < 0.60:
+            return "NÖTR (Düşük Güven)", 0
+
+        # --- DÜZELTME BİTİŞİ ---
 
         if sonuc_str in ["Olumlu", "Pozitif", "1", "positive", "iyi"]:
             return "MUTLU (POZİTİF)", 2
         elif sonuc_str in ["Olumsuz", "Negatif", "-1", "negative", "kötü"]:
             return "KIZGIN (NEGATİF)", -2
         else:
-            # "Tarafsız" veya diğer durumlar
             return "NÖTR", 0
 
     except Exception as e:

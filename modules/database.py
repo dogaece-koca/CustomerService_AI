@@ -42,30 +42,22 @@ def kimlik_dogrula(siparis_no, ad, telefon):
 
     conn = get_db_connection()
     try:
-        # A5 ÇÖZÜMÜ: Telefon Temizliği ve 10 Haneye Sabitleme
-        # Yalnızca rakamları tutar (055551112233 -> 55551112233)
         temiz_telefon = re.sub(r'[^0-9]', '', str(telefon))
 
-        # '90' ile başlıyorsa kaldır (Ülke kodu temizliği)
         if len(temiz_telefon) > 10 and temiz_telefon.startswith('90'):
             temiz_telefon = temiz_telefon[2:]
-        # '0' ile başlıyorsa kaldır (Operatör kodu temizliği)
         elif len(temiz_telefon) > 10 and temiz_telefon.startswith('0'):
             temiz_telefon = temiz_telefon[1:]
 
-            # Numara hala 11 haneliyse (Konuşma Tanıma hatası nedeniyle '5' fazladan gelmiş olabilir)
-        # sadece son 10 hanesini alarak hatalı fazla rakamı at.
         if len(temiz_telefon) > 10:
             temiz_telefon = temiz_telefon[-10:]
 
-        # Telefon 10 haneye sabitlenmeli (DB'de 10 haneli saklanıyor)
         if len(temiz_telefon) != 10:
             print(f"DB formatına uymuyor (10 hane bekleniyor): {temiz_telefon}")
             return "BASARISIZ|Telefon numarası formatı hatalı."
 
         print(f"DB İçin Temiz Telefon: {temiz_telefon}")
 
-        # DB Sorgusu: Sipariş No ve Telefon Eşleşmesi (A4 için)
         query = """
             SELECT s.siparis_no, m.musteri_id, m.ad_soyad,
                    CASE 
@@ -80,7 +72,6 @@ def kimlik_dogrula(siparis_no, ad, telefon):
         row = conn.execute(query, (siparis_no, temiz_telefon)).fetchone()
 
         if not row:
-            # A4 ÇÖZÜMÜ: Telefon / Sipariş No eşleşmezse
             print("DB Sonucu: Kayıt bulunamadı (Telefon veya Sipariş No yanlış).")
             return "BASARISIZ|Bilgiler eşleşmiyor."  # Yanlış telefon veya numara
 
@@ -88,12 +79,10 @@ def kimlik_dogrula(siparis_no, ad, telefon):
         girilen_ad_temiz = metin_temizle(ad)
         db_ad_temiz = metin_temizle(db_ad_soyad)
 
-        # A3 ÇÖZÜMÜ: İsim Eşleşmesi Kontrolü (Küçük isim, büyük ismin içinde olmalı)
         if girilen_ad_temiz in db_ad_temiz or db_ad_temiz in girilen_ad_temiz:
             print("İsim Eşleşmesi BAŞARILI.")
             return f"BASARILI|{row['siparis_no']}|{row['ad_soyad']}|{row['rol']}|{row['musteri_id']}"
         else:
-            # A3 ÇÖZÜMÜ: Yanlış İsim
             print("İsim Eşleşmesi BAŞARISIZ.")
             return "BASARISIZ|İsim bilgisi uyuşmuyor."
 
@@ -222,23 +211,64 @@ def sikayet_olustur(no, konu, musteri_id):
     finally:
         conn.close()
 
+
+from datetime import datetime, timedelta  # En tepeye eklemediysen ekle
+
+from datetime import datetime, timedelta
+import sqlite3  # Kullanılan kütüphaneye göre değişebilir
+
+
 def gecikme_sikayeti(no, musteri_id):
-    if not no: return "Gecikme şikayetinizle ilgilenebilmemiz için lütfen sipariş veya takip numaranızı belirtin."
+    if not no:
+        return "Gecikme şikayetinizle ilgilenebilmemiz için lütfen sipariş veya takip numaranızı belirtin."
 
     conn = get_db_connection()
-    try:
-        # DB'ye yeni bir şikayet kaydı ekleniyor (DB yapısına uygun hale getirildi)
-        conn.execute("""
-            INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
-            VALUES (?, ?, ?, ?, datetime('now'), 'ACIK')
-        """, (musteri_id, no, 'Gecikme Şikayeti', f"{no} numaralı kargo gecikme şikayeti aldı."))
-        conn.commit()
+    cursor = conn.cursor()
 
-        return f"{no} numaralı kargonuzun gecikmesi için özür dileriz. Şikayetiniz kayda alınmıştır. En geç 2 gün içinde teslim edilecektir."
+    try:
+        cursor.execute("SELECT tahmini_teslim FROM kargo_takip WHERE takip_no = ?", (no,))
+        sonuc = cursor.fetchone()
+
+        if not sonuc:
+            return "Hata: Belirttiğiniz numaraya ait bir kargo kaydı bulunamadı."
+
+        mevcut_tarih_str = sonuc[0]  # Örn: '2023-12-15'
+        mevcut_teslim_tarihi = datetime.strptime(mevcut_tarih_str, '%Y-%m-%d').date()
+        bugun = datetime.now().date()
+
+        if mevcut_teslim_tarihi < bugun:
+
+            yeni_tarih_obj = bugun + timedelta(days=1)
+            yeni_tarih_str = yeni_tarih_obj.strftime('%Y-%m-%d')
+
+            cursor.execute("""
+                UPDATE kargo_takip 
+                SET tahmini_teslim = ? 
+                WHERE takip_no = ?
+            """, (yeni_tarih_str, no))
+
+            aciklama = f"{no} nolu kargo gecikti (Eski tarih: {mevcut_tarih_str}). Teslimat {yeni_tarih_str} tarihine ötelendi."
+
+            cursor.execute("""
+                INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
+                VALUES (?, ?, ?, ?, datetime('now'), 'ACIK')
+            """, (musteri_id, no, 'Gecikme Şikayeti', aciklama))
+
+            conn.commit()
+
+            return (
+                f"Kontrollerimi sağladım ve haklısınız, kargonuzun {mevcut_tarih_str} tarihinde teslim edilmesi gerekiyordu. "
+                f"Yaşanan aksaklık için çok özür dilerim. Şikayet kaydınızı oluşturdum. "
+                f"Teslimat tarihini sistemde {yeni_tarih_str} (yarın) olarak güncelledim, sürecin takipçisi olacağım.")
+
+        else:
+            return (f"Sistemdeki kontrollerimi yaptım; şu an için bir gecikme görünmüyor. "
+                    f"Tahmini teslimat tarihiniz {mevcut_tarih_str} olarak gözüküyor. "
+                    f"Kargonuzun zamanında ulaşması için elimizden geleni yapıyoruz.")
 
     except Exception as e:
         print(f"Veritabanı Hata: {e}")
-        return "Şikayet kaydı sırasında teknik bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+        return "İşlem sırasında teknik bir hata oluştu. Lütfen daha sonra tekrar deneyin."
     finally:
         conn.close()
 

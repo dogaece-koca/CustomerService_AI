@@ -6,6 +6,8 @@ from modules.database import kimlik_dogrula, ucret_hesapla, kampanya_sorgula, ka
     alici_adi_degistir, kurye_gelmedi_sikayeti, hizli_teslimat_ovgu, kimlik_dogrulama_sorunu, yurt_disi_kargo_kosul
 from modules.ml_modulu import duygu_analizi_yap, teslimat_suresi_hesapla
 from dotenv import load_dotenv
+from datetime import datetime
+import math
 import json
 import os
 import re
@@ -14,7 +16,6 @@ try:
     import google.generativeai as genai
 except ImportError:
     genai = None
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_FOLDER = os.path.join(BASE_DIR, 'static')
@@ -25,6 +26,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if genai and GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+
 
 def mesafe_hesapla_ai(cikis, varis):
     if not cikis or not varis: return 0
@@ -103,10 +105,20 @@ def vergi_hesapla_ai(urun_kategorisi, fiyat, hedef_ulke):
         print(f"Vergi AI Hatası: {e}")
         return f"Şu an gümrük veritabanına erişilemiyor. Teknik Hata: {e}"
 
+
 def process_with_gemini(session_id, user_message, user_sessions):
     if not genai: return "AI kapalı."
 
     model = genai.GenerativeModel('gemini-2.5-flash')
+
+
+    simdi = datetime.now()
+    tarih_str = simdi.strftime("%d.%m.%Y")
+    gun_str = simdi.strftime("%A")
+    saat_str = simdi.strftime("%H:%M")
+
+    zaman_bilgisi = f"BUGÜNÜN TARİHİ: {tarih_str} ({gun_str}) - SAAT: {saat_str}"
+
 
     default_session = {'history': [], 'verified': False, 'tracking_no': None, 'user_name': None, 'role': None,
                        'user_id': None, 'pending_intent': None}
@@ -147,16 +159,24 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
     system_prompt = f"""
     GÖREV: Hızlı Kargo sesli asistanısın. {status_prompt}
+    
+    SİSTEM ZAMANI: {zaman_bilgisi}
+    (Tüm tarih hesaplamalarını, 'bugün', 'yarın', '2 gün sonra' gibi ifadeleri yukarıdaki SİSTEM ZAMANI'na göre yap.)
 
     !!! KRİTİK DUYGU DURUMU ANALİZİ !!!
     {duygu_notu}
 
     ÖN İŞLEM: Tek tek söylenen sayıları birleştir (bir iki üç -> 123).
     ÇIKTI: SADECE JSON.
-    
+
     !!! KESİN VE DEĞİŞMEZ KURAL !!!
     - CEVAPLARDA ASLA EMOJİ KULLANMA (Örn: 😊, 👋, 📦 YASAK). 
     - SADECE DÜZ METİN VE NOKTALAMA İŞARETLERİ KULLAN.
+    
+    # TUTARLILIK KURALI
+    - TARİH TUTARLILIĞI: Eğer veritabanından gelen bir "Tahmini Teslim Tarihi" varsa, müşteri ne kadar kızgın olursa olsun ASLA bu tarihi değiştirme.
+       - YANLIŞ: "Özür dileriz, şikayet oluşturdum, kargonuz 2 gün içinde gelir." (Veri uydurma!)
+       - DOĞRU: "Yaşanan aksaklık için çok özür dilerim, şikayet kaydınızı oluşturdum. Sistemlerimize göre kargonuz BUGÜN teslim edilecek görünüyor, süreci hızlandırmaları için şubeyi uyarıyorum."
 
     ANALİZ KURALLARI VE ÖNCELİKLERİ:
 
@@ -317,18 +337,29 @@ def process_with_gemini(session_id, user_message, user_sessions):
     try:
         result = model.generate_content(full_prompt)
         text_response = result.text.replace("```json", "").replace("```", "").strip()
-        print(f"DEBUG: AI Yanıtı: {text_response}")
+        # --- DEBUG NOKTASI 1: AI NE ÜRETTİ? ---
+        print(f"\n🔥🔥🔥 [DEBUG] AI HAM CEVAP: {text_response}")
+        # --------------------------------------
 
         data = json.loads(text_response)
         final_reply = ""
+        func = None  # Hata önleyici
 
         if data.get("type") == "action":
             func = data.get("function")
             params = data.get("parameters", {})
+
+            # --- DEBUG NOKTASI 2: HANGİ FONKSİYON SEÇİLDİ? ---
+            print(f"✅ [DEBUG] SEÇİLEN FONKSİYON: {func}")
+            print(f"🔍 [DEBUG] PARAMETRELER: {params}")
+            # -------------------------------------------------
             system_res = ""
 
             if func == "kimlik_dogrula":
+                print("🚀 [DEBUG] kimlik_dogrula ÇAĞRILIYOR...")
                 res = kimlik_dogrula(params.get("no"), params.get("ad"), params.get("telefon"))
+
+                print(f"💾 [DEBUG] DB DÖNÜŞÜ: {res}")  # DB'den ne döndü?
 
                 if res.startswith("BASARILI"):
                     parts = res.split("|")
@@ -346,13 +377,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
                         session_data['pending_intent'] = None
                         user_sessions[session_id] = session_data
 
-
                         return process_with_gemini(session_id, pending_intent, user_sessions)
 
                     rol_mesaji = "gönderici" if parts[3] == "gonderici" else "alıcı"
                     final_prompt = f"Kullanıcıya kimlik doğrulamanın başarılı olduğunu ve sistemde {rol_mesaji} olarak göründüğünü söyle. 'Nasıl yardımcı olabilirim?' diye sor."
                 else:
-                    # A3 ve A4 Çözümü: Hata çıktısını müşteriye net iletme
                     hata_mesaji = res.split('|')[-1]
                     final_prompt = f"Kullanıcıya bilgilerin eşleşmediğini söyle ve tekrar denemesini iste. Hata: {hata_mesaji}. SADECE yanıt metni."
                 system_res = res
@@ -368,7 +397,6 @@ def process_with_gemini(session_id, user_message, user_sessions):
             elif func == "kampanya_sorgula":
                 res = kampanya_sorgula()
 
-                # H1 ÇÖZÜMÜ: AI'ın ham veriyi işleyip, istenen kampanyayı direkt söylemesini sağlıyoruz.
                 ozel_prompt = f"""
                                 GÖREV: Müşteri Hizmetleri Asistanısın. Müşteriye aktif kampanyaları SADECE konuşma metni olarak aktar.
                                 ELİNDEKİ VERİ: {res}. 
@@ -381,25 +409,20 @@ def process_with_gemini(session_id, user_message, user_sessions):
                                 4. Cevap MAKSİMUM 1 cümle olsun. Doğrudan bilgi ver.
                                 """
                 try:
-                    # AI'dan dönen yanıtı direkt olarak final_reply'a ata
                     final_reply = model.generate_content(ozel_prompt).text.strip()
                     if not final_reply or "web sitesi" in final_reply.lower() or "duyuru" in final_reply.lower():
-                        # Eğer AI kuralı ihlal ederse veya boş dönerse, manuel formatı kullan
                         if "Öğrenci" in user_message or "öğrenci" in user_message:
                             final_reply = "Evet, öğrenci kimliğiyle gelenlere %50 indirim uyguluyoruz."
                         else:
-                            # Genel olarak tüm kampanyaları ilet (son çare)
                             final_reply = f"Aktif kampanyalarımız şunlardır: {res.replace(' | ', ', ')}"
 
                 except Exception as e:
-                    # AI cevap veremezse, ham veriyi nazikçe ilet
                     print(f"Kampanya AI Hatası: {e}")
                     final_reply = f"Şu anda aktif kampanyalarımız şunlardır: {res}"
 
             elif func == "vergi_hesapla_ai":
                 res = vergi_hesapla_ai(params.get("urun_kategorisi"), params.get("fiyat"), params.get("hedef_ulke"))
 
-                # D3 Çözümü: AI'ın JSON döndürme hatası yapma ihtimaline karşı try-catch eklenecek
                 try:
                     # Önce AI'dan yanıtı al
                     raw_ai_response = model.generate_content(
@@ -481,11 +504,12 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     mesafe = mesafe_hesapla_ai(cikis, varis)
 
                     if mesafe > 0:
+                        ham_sure = teslimat_suresi_hesapla(mesafe, desi)
 
-                        sure = teslimat_suresi_hesapla(mesafe, desi)
+                        sure = math.ceil(ham_sure)
 
                         system_res = (f"Geçmiş taşıma verilerimize dayanarak yaptığım analize göre, "
-                                      f"{cikis} ile {varis} arasındaki gönderimlerin ortalama {sure} gün sürdüğünü görüyorum. "
+                                      f"{cikis} ile {varis} arasındaki gönderimlerin ortalama {sure} gün süreceğini öngörüyorum. "
                                       f"Mesafe yaklaşık {int(mesafe)} kilometre.")
                     else:
                         system_res = "Şehirler arası mesafe hesaplanamadı, lütfen tekrar deneyin."

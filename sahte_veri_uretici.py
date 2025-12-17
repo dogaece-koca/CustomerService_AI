@@ -23,7 +23,7 @@ fake = Faker('tr_TR')
 def telefon_uret():
     baslangic = random.choice(["530", "532", "535", "542", "544", "505", "506", "555"])
     kalan = "".join([str(random.randint(0, 9)) for _ in range(7)])
-    return f"{baslangic} {kalan[:3]} {kalan[3:5]} {kalan[5:]}"
+    return f"{baslangic}{kalan}" # Başında 0 olmadan, 10 hane, boşluksuz
 
 
 def veri_uret():
@@ -184,7 +184,7 @@ def veri_uret():
         os.path.join(CSV_FOLDER, 'kampanyalar.csv'), index=False)
 
     # Tarife
-    tarife = [[1, 35, 50, 100, 5, 20, 30, 200]]
+    tarife = [[1, 5, 10, 100, 5, 20, 30, 200]]
     pd.DataFrame(tarife, columns=['id', 'kisa_mesafe_km_ucret', 'uzak_mesafe_km_ucret', 'taban_desi_ucreti',
                                   'taban_desi_limiti', 'kisa_mesafe_ek_desi_ucret', 'uzak_mesafe_ek_desi_ucret',
                                   'mesafe_siniri_km']).to_csv(os.path.join(CSV_FOLDER, 'ucretlendirme_tarife.csv'),
