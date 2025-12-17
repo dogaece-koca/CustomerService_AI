@@ -48,7 +48,6 @@ def teslimat_suresi_hesapla(mesafe, agirlik):
 
 EGITILMIS_MODEL = None
 
-
 def metin_temizle(metin):
     if not isinstance(metin, str): return ""
 

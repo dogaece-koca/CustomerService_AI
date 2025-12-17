@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_FILE = os.path.join(BASE_DIR, 'sirket_veritabani.db')
 
-print(f"💾 Veritabanı Yolu: {DB_FILE}")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
@@ -73,7 +72,7 @@ def kimlik_dogrula(siparis_no, ad, telefon):
 
         if not row:
             print("DB Sonucu: Kayıt bulunamadı (Telefon veya Sipariş No yanlış).")
-            return "BASARISIZ|Bilgiler eşleşmiyor."  # Yanlış telefon veya numara
+            return "BASARISIZ|Bilgiler eşleşmiyor."
 
         db_ad_soyad = row['ad_soyad']
         girilen_ad_temiz = metin_temizle(ad)
@@ -434,7 +433,6 @@ def bildirim_ayari_degistir(tip, musteri_id):
     if not tip: return "SMS mi E-posta mı istiyorsunuz?"
     if not musteri_id: return "Önce giriş yapmalısınız."
 
-    # H2 Çözümü: Karşılaştırmayı sadeleştirme
     tip_normalized = tip.lower().strip()
     if "sms" in tip_normalized:
         final_tip = "SMS"
@@ -447,7 +445,6 @@ def bildirim_ayari_degistir(tip, musteri_id):
     try:
         conn.execute("UPDATE musteriler SET bildirim_tercihi = ? WHERE musteri_id = ?", (final_tip, musteri_id))
         conn.commit()
-        # Dönen sonuç, AI'ın kolayca anlayabileceği net bir cümle olmalı.
         return f"Bildirim tercihiniz başarıyla '{final_tip}' olarak güncellenmiştir."
     except Exception as e:
         return f"Hata: {e}"
@@ -482,47 +479,57 @@ def yanlis_teslimat_bildirimi(no, dogru_adres, musteri_id):
     finally:
         conn.close()
 
+
 def sube_sorgula(lokasyon):
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row  # Sütun isimleriyle erişmek için
+    cursor = conn.cursor()
+
     try:
-        if lokasyon and "genel" not in lokasyon.lower():
+        # --- SENARYO 1: KULLANICI SPESİFİK BİR YER SÖYLEDİ (Örn: "İzmir şubesi") ---
+        if lokasyon and "genel" not in lokasyon.lower() and "nerede" not in lokasyon.lower():
             lokasyon_temiz = f"%{lokasyon}%"
             query = "SELECT sube_adi, il, ilce, adres, telefon FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?"
-            rows = conn.execute(query, (lokasyon_temiz, lokasyon_temiz, lokasyon_temiz)).fetchall()
+            rows = cursor.execute(query, (lokasyon_temiz, lokasyon_temiz, lokasyon_temiz)).fetchall()
 
-            if not rows: return f"'{lokasyon}' bölgesinde şubemiz bulunmamaktadır."
+            if not rows:
+                return f"Maalesef {lokasyon} bölgesinde henüz bir şubemiz bulunmuyor."
 
-            cevap_listesi = []
-            for row in rows:
-                adres_dogal = row['adres'] \
-                    .replace("Mah.", "Mahallesi") \
-                    .replace("Cad.", "Caddesi") \
-                    .replace("Bul.", "Bulvarı") \
-                    .replace("Sok.", "Sokağı") \
-                    .replace("No:", "Numara")
+            if len(rows) == 1:
+                row = rows[0]
+                temiz_ad = row['sube_adi'].replace(" Şube", "").replace(" Şubesi", "").strip()
+                adres_okunabilir = row['adres'].replace("/", " taksim ").replace("No:", "Numara ")
 
-                konum = f"{row['il']}'in {row['ilce']} ilçesinde" if row['il'] != row[
-                    'ilce'] else f"{row['il']} merkezde"
-                cumle = (f"{row['sube_adi']} şubemiz, {konum}, {adres_dogal} adresinde hizmet vermektedir. "
-                          f"İletişim için {row['telefon']} numarasını arayabilirsiniz.")
-                cevap_listesi.append(cumle)
+                return (f"{temiz_ad} şubemiz, {row['ilce']} ilçesinde hizmet veriyor. "
+                        f"Açık adresi şöyle: {adres_okunabilir}.")
 
-            return "\n\n".join(cevap_listesi)
+            else:
+                sube_isimleri = [row['sube_adi'].replace(" Şube", "").strip() for row in rows]
+                isimler_str = ", ".join(sube_isimleri)
+                return f"{lokasyon} bölgesinde {len(rows)} şubemiz var: {isimler_str}. Hangisinin adresini istersiniz?"
 
         else:
-            query = "SELECT sube_adi, il, ilce FROM subeler"
-            rows = conn.execute(query).fetchall()
-            if not rows: return "Sistemde kayıtlı şube bulunamadı."
+            query = "SELECT DISTINCT il FROM subeler"
+            rows = cursor.execute(query).fetchall()
 
-            cevap = "Şu anda hizmet veren şubelerimiz şunlardır:\n"
-            for row in rows:
-                cevap += f"- {row['sube_adi']} ({row['il']}/{row['ilce']})\n"
+            if not rows: return "Sistemde şu an aktif bir şube görünmüyor."
 
-            cevap += "\nAdresini öğrenmek istediğiniz şubeyi söyler misiniz?"
-            return cevap
+            sehirler = [row['il'] for row in rows]
+            toplam_sehir = len(sehirler)
+
+            sehirler_str = ", ".join(sehirler[:5])
+
+            if toplam_sehir > 5:
+                ek_metin = f"ve {toplam_sehir - 5} diğer şehirde"
+            else:
+                ek_metin = ""
+
+            return (f"Şu anda Türkiye genelinde toplam {toplam_sehir} farklı şehirde hizmet veriyoruz. "
+                    f"Başlıca {sehirler_str} {ek_metin} şubelerimiz bulunuyor. "
+                    f"Hangi şehirdeki şubeyi öğrenmek istersiniz?")
 
     except Exception as e:
-        return f"Hata: {e}"
+        return f"Şube bilgisi çekilirken teknik bir hata oldu."
     finally:
         conn.close()
 

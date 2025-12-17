@@ -327,7 +327,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
         result = model.generate_content(full_prompt)
         text_response = result.text.replace("```json", "").replace("```", "").strip()
         # --- DEBUG NOKTASI---
-        print(f"\n🔥🔥🔥 [DEBUG] AI HAM CEVAP: {text_response}")
+        print(f"\n[DEBUG] AI HAM CEVAP: {text_response}")
         # --------------------------------------
 
         data = json.loads(text_response)
@@ -345,35 +345,55 @@ def process_with_gemini(session_id, user_message, user_sessions):
             system_res = ""
 
             if func == "kimlik_dogrula":
-                print("🚀 [DEBUG] kimlik_dogrula ÇAĞRILIYOR...")
-                res = kimlik_dogrula(params.get("no"), params.get("ad"), params.get("telefon"))
+                print("[DEBUG] kimlik_dogrula ÇAĞRILIYOR...")
 
-                print(f"💾 [DEBUG] DB DÖNÜŞÜ: {res}")  # DB'den ne döndü?
+                db_sonuc = kimlik_dogrula(params.get("no"), params.get("ad"), params.get("telefon"))
+                print(f"[DEBUG] DB DÖNÜŞÜ: {db_sonuc}")
 
-                if res.startswith("BASARILI"):
-                    parts = res.split("|")
+                if db_sonuc.startswith("BASARILI"):
+                    parts = db_sonuc.split("|")
                     user_sessions[session_id]['verified'] = True
                     user_sessions[session_id]['tracking_no'] = parts[1]
                     user_sessions[session_id]['user_name'] = parts[2]
                     user_sessions[session_id]['role'] = parts[3]
                     user_sessions[session_id]['user_id'] = parts[4]
+                    user_sessions[session_id]['durum'] = "SERBEST"
                     user_sessions[session_id] = session_data
 
                     pending_intent = session_data.get('pending_intent')
                     if pending_intent:
-                        print(f"\n🚀 [DEBUG] BEKLEYEN NİYET OTOMATİK ÇALIŞTIRILIYOR: '{pending_intent}'\n")
-
+                        print(f"\n[DEBUG] BEKLEYEN NİYET OTOMATİK ÇALIŞTIRILIYOR: '{pending_intent}'\n")
                         session_data['pending_intent'] = None
                         user_sessions[session_id] = session_data
-
                         return process_with_gemini(session_id, pending_intent, user_sessions)
 
-                    rol_mesaji = "gönderici" if parts[3] == "gonderici" else "alıcı"
-                    final_prompt = f"Kullanıcıya kimlik doğrulamanın başarılı olduğunu ve sistemde {rol_mesaji} olarak göründüğünü söyle. 'Nasıl yardımcı olabilirim?' diye sor."
+                    rol = "Gönderici" if parts[3] == "gonderici" else "Alıcı"
+
+                    success_prompt = f"""
+                                        GÖREV: Sesli asistan olarak yanıt ver.
+                                        DURUM: Kimlik doğrulama başarılı. Kullanıcı: {parts[2]} ({rol}).
+                                        TALİMAT: Kullanıcıya ismiyle hitap et, doğrulamanın yapıldığını söyle ve 'Size nasıl yardımcı olabilirim?' diye sor.
+                                        """
+                    final_reply = model.generate_content(success_prompt).text.strip()
+
                 else:
-                    hata_mesaji = res.split('|')[-1]
-                    final_prompt = f"Kullanıcıya bilgilerin eşleşmediğini söyle ve tekrar denemesini iste. Hata: {hata_mesaji}. SADECE yanıt metni."
-                system_res = res
+                    hata_detayi = db_sonuc.split('|')[-1] if '|' in db_sonuc else "Bilgiler eşleşmedi."
+
+                    hata_prompt = f"""
+                                GÖREV: Bir kargo şirketi sesli asistanısın.
+                                DURUM: Kullanıcı kimlik doğrulaması yapamadı.
+                                SİSTEM HATASI: {hata_detayi} (Bunu kullanıcıya teknik terimle söyleme!)
+                                YAPILACAKLAR:
+                                1. Kullanıcıya nazikçe bilgilerin sistemdekiyle eşleşmediğini söyle.
+                                2. "{hata_detayi}" bilgisine göre ipucu ver. 
+                                    - Eğer sorun isimdeyse: "Sistemdeki kayıtla söylediğiniz isim eşleşmedi, rica etsem isminizi tekrar söyler misiniz?" de.
+                                    - Eğer sorun numaradaysa: "Bu numaraya ait bir kayıt bulamadım, takip numaranızı kontrol edip tekrar okur musunuz?" de.
+                                3. Tekrar denemesini iste.
+                                4. ASLA teknik hata kodlarını (BASARISIZ|...) kullanıcıya okuma.
+                                5. Kısa tut (Sesli okunacak).
+                                """
+                    final_reply = model.generate_content(hata_prompt).text.strip()
+                    system_res = f"Doğrulama Hatası: {hata_detayi}"
 
             elif func == "ucret_hesapla":
                 raw_result = ucret_hesapla(params.get("cikis"), params.get("varis"), params.get("desi"))
