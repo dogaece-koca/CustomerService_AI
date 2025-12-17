@@ -439,10 +439,13 @@ def process_with_gemini(session_id, user_message, user_sessions):
             elif func == "kargo_ucret_itiraz":
                 system_res = kargo_ucret_itiraz(saved_no, params.get("fatura_no"), user_id)
             elif func == "yanlis_teslimat_bildirimi":
-                if not params.get("dogru_adres"):
-                    final_reply = "Anladım, bir karışıklık olmuş. Kargonun aslında hangi adrese teslim edilmesi gerekiyordu?"
+                gelen_adres = params.get("dogru_adres")
+                if not gelen_adres:
+                    final_reply = "Anladım, teslimat adresinde bir karışıklık olmuş. Kargonuzun yönlendirilmesini istediğiniz doğru ve açık adresi söyler misiniz?"
                 else:
-                    system_res = yanlis_teslimat_bildirimi(params.get("no"), params.get("dogru_adres"), user_id)
+                    aktif_no = session_data.get('tracking_no') or params.get("no")
+                    system_res = yanlis_teslimat_bildirimi(aktif_no, gelen_adres, user_id)
+                    final_reply = system_res
             elif func == "sube_saat_sorgula":
                 system_res = sube_saat_sorgula(params.get("lokasyon"))
             elif func == "sube_sorgula":
@@ -523,7 +526,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     else:
                         system_res = "Şehirler arası mesafe hesaplanamadı, lütfen tekrar deneyin."
 
-            if func != "kimlik_dogrula" and func != "kampanya_sorgula" and func != "vergi_hesapla_ai":
+            if func != "kimlik_dogrula" and func != "kampanya_sorgula" and func != "vergi_hesapla_ai" and func != "yanlis_teslimat_bildirimi":
                 final_prompt = f"GÖREV: Kullanıcıya şu sistem bilgisini nazikçe ilet: {system_res}. SADECE yanıt metni. Kural: Eğer mesaj bir onay veya bilgi verme cümlesiyse, olduğu gibi kullan. Eğer bir hata içeriyorsa, nazikçe açıkla."
 
                 if system_res.startswith("YENİ_NO_OLUŞTU"):
