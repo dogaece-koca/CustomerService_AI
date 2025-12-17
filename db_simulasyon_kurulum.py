@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import os
 
-# --- AYARLAR ---
+# --- AYARLAR ---s
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'sirket_veritabani.db')
 CSV_FOLDER = os.path.join(BASE_DIR, 'veri_dosyalari')
@@ -12,17 +12,15 @@ def veritabani_kur():
     # 1. TEMİZLİK: Eski veritabanını sil (Temiz kurulum için)
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
-        print(f"♻️  Eski veritabanı temizlendi: {DB_FILE}")
+        print(f"♻Eski veritabanı temizlendi: {DB_FILE}")
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    print("✅ Veritabanı bağlantısı kuruldu.")
+    print("Veritabanı bağlantısı kuruldu.")
 
     # ---------------------------------------------------------
-    # 2. TABLO ŞEMALARINI OLUŞTUR (CREATE TABLES)
+    # 2. TABLO ŞEMALARINI OLUŞTUR
     # ---------------------------------------------------------
-    # Not: CSV'den okumadan önce tabloları doğru veri tipleri ve
-    # Primary/Foreign Key ayarlarıyla oluşturuyoruz.
 
     # A. ŞUBELER
     cursor.execute('''CREATE TABLE IF NOT EXISTS subeler (
@@ -72,15 +70,16 @@ def veritabani_kur():
 
     # F. KARGO TAKİP (ANA TABLO)
     cursor.execute('''CREATE TABLE IF NOT EXISTS kargo_takip (
-        takip_no TEXT PRIMARY KEY,
-        siparis_no TEXT,
-        durum_id INTEGER,
-        tahmini_teslim DATE,
-        teslim_adresi TEXT,
-        kurye_id INTEGER,
-        FOREIGN KEY(siparis_no) REFERENCES siparisler(siparis_no),
-        FOREIGN KEY(kurye_id) REFERENCES kuryeler(kurye_id)
-    )''')
+            takip_no TEXT PRIMARY KEY,
+            siparis_no TEXT,
+            durum_id INTEGER,
+            tahmini_teslim DATE,
+            teslim_adresi TEXT,
+            kurye_id INTEGER,
+            oncelik_puani INTEGER DEFAULT 0, -- Yeni eklenen kolon (0: Normal, 3: Kritik)
+            FOREIGN KEY(siparis_no) REFERENCES siparisler(siparis_no),
+            FOREIGN KEY(kurye_id) REFERENCES kuryeler(kurye_id)
+        )''')
 
     # G. KARGO HAREKETLERİ (GEÇMİŞ)
     cursor.execute('''CREATE TABLE IF NOT EXISTS kargo_hareketleri (
@@ -170,8 +169,15 @@ def veritabani_kur():
         durum TEXT DEFAULT 'BEKLIYOR'
     )''')
 
+    cursor.execute('''CREATE TABLE IF NOT EXISTS kargo_oncelik (
+            id INTEGER PRIMARY KEY,
+            oncelik_adi TEXT,
+            aciklama TEXT,
+            renk_kodu TEXT DEFAULT '#FFFFFF'
+        )''')
+
     conn.commit()
-    print("✅ Tablo yapıları oluşturuldu.")
+    print("Tablo yapıları oluşturuldu.")
 
     # ---------------------------------------------------------
     # 3. CSV DOSYALARINDAN VERİ AKTARIMI
@@ -180,7 +186,7 @@ def veritabani_kur():
     def csv_yukle(dosya_adi, tablo_adi):
         dosya_yolu = os.path.join(CSV_FOLDER, dosya_adi)
         if not os.path.exists(dosya_yolu):
-            print(f"⚠️ UYARI: '{dosya_adi}' bulunamadı, '{tablo_adi}' tablosu boş kalacak.")
+            print(f"UYARI: '{dosya_adi}' bulunamadı, '{tablo_adi}' tablosu boş kalacak.")
             return
 
         try:
@@ -189,10 +195,10 @@ def veritabani_kur():
 
             # Veritabanına "append" moduyla ekle
             df.to_sql(tablo_adi, conn, if_exists='append', index=False)
-            print(f"📥 {dosya_adi} --> '{tablo_adi}' tablosuna {len(df)} kayıt yüklendi.")
+            print(f"{dosya_adi} --> '{tablo_adi}' tablosuna {len(df)} kayıt yüklendi.")
 
         except Exception as e:
-            print(f"❌ HATA ({dosya_adi}): {e}")
+            print(f"HATA ({dosya_adi}): {e}")
 
     print("\n--- Veriler Yükleniyor ---")
     csv_yukle('subeler.csv', 'subeler')
@@ -205,14 +211,15 @@ def veritabani_kur():
     csv_yukle('musteri_faturalar.csv', 'musteri_faturalar')
     csv_yukle('kampanyalar.csv', 'kampanyalar')
     csv_yukle('ucretlendirme_tarife.csv', 'ucretlendirme_tarife')
+    csv_yukle('kargo_oncelik.csv', 'kargo_oncelik')
 
     conn.close()
-    print("\n🚀 VERİTABANI KURULUMU TAMAMLANDI!")
+    print("\nVERİTABANI KURULUMU TAMAMLANDI!")
 
 
 if __name__ == "__main__":
     if not os.path.exists(CSV_FOLDER):
         os.makedirs(CSV_FOLDER)
-        print(f"❌ HATA: '{CSV_FOLDER}' klasörü bulunamadı. Lütfen önce 'sahte_veri_uretici.py' dosyasını çalıştırın.")
+        print(f"HATA: '{CSV_FOLDER}' klasörü bulunamadı. Lütfen önce 'sahte_veri_uretici.py' dosyasını çalıştırın.")
     else:
         veritabani_kur()

@@ -212,6 +212,18 @@ def veri_uret():
                  columns=['takip_no', 'islem_tarihi', 'islem_yeri', 'islem_tipi', 'aciklama', 'hedef_sube_id']).to_csv(
         os.path.join(CSV_FOLDER, 'kargo_hareketleri.csv'), index=False)
 
+    oncelik_verileri = [
+        [0, 'Standart', 'Normal gönderi akışı', '#GRAY'],
+        [1, 'Hızlı Teslimat', 'Ek ücretli hızlı gönderi', '#BLUE'],
+        [2, 'Yüksek Öncelik', 'Gecikme veya şikayet sonrası', '#ORANGE'],
+        [3, 'KRİTİK', 'Kurye gelmedi/Acil müdahale', '#RED']
+    ]
+
+    pd.DataFrame(oncelik_verileri,
+                 columns=['id', 'oncelik_adi', 'aciklama', 'renk_kodu']).to_csv(
+        os.path.join(CSV_FOLDER, 'kargo_oncelik.csv'), index=False)
+
+
     print("\n✅ TÜM CSV DOSYALARI OLUŞTURULDU! Şimdi 'db_simulasyon_kurulum.py' çalıştırın.")
 
 

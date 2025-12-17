@@ -3,7 +3,8 @@ from modules.database import kimlik_dogrula, ucret_hesapla, kampanya_sorgula, ka
     sikayet_olustur, hasar_kaydi_olustur, kargo_bilgisi_getir, tahmini_teslimat_saati_getir, iade_islemi_baslat, \
     kargo_iptal_et, adres_degistir, alici_adresi_degistir, kargo_durum_destek, fatura_bilgisi_gonderici, \
     evde_olmama_bildirimi, supervizor_talebi, bildirim_ayari_degistir, takip_numarasi_hatasi, gecikme_sikayeti, \
-    alici_adi_degistir, kurye_gelmedi_sikayeti, hizli_teslimat_ovgu, kimlik_dogrulama_sorunu, yurt_disi_kargo_kosul
+    kurye_gelmedi_sikayeti, hizli_teslimat_ovgu, kimlik_dogrulama_sorunu, yurt_disi_kargo_kosul, \
+    alici_bilgisi_guncelle
 from modules.ml_modulu import duygu_analizi_yap, teslimat_suresi_hesapla
 from dotenv import load_dotenv
 from datetime import datetime
@@ -244,23 +245,23 @@ def process_with_gemini(session_id, user_message, user_sessions):
     - "Ne zaman gelir?", "Saat kaçta teslim olur?", "Hangi gün gelir?":
       -> {{ "type": "action", "function": "tahmini_teslimat", "parameters": {{ "no": "{saved_no}" }} }}
 
-    # KARGONUN GECİKMESİ ŞİKAYETİ (4. NİYET)
+    # KARGONUN GECİKMESİ ŞİKAYETİ 
     - "Kargom gecikti", "teslimat süresi aşıldı", "çok yordu" -> {{ "type": "action", "function": "gecikme_sikayeti", "parameters": {{ "no": "{saved_no}", "musteri_id": "{{user_id}}" }} }}
 
-    # KARGO TAKİP NUMARASI HATASI (7. NİYET)
+    # KARGO TAKİP NUMARASI HATASI 
     - Kullanıcı **"takip numarası hatalı", "geçersiz numara", "kod yanlış", "sistem görmüyor"** veya **"numara bulunamadı"** gibi sorunlardan bahsediyorsa:
       -> {{ "type": "action", "function": "takip_numarasi_hatasi", "parameters": {{}} }}
 
-    # KURYE GELMEMESİ ŞİKAYETİ (9. NİYET)
+    # KURYE GELMEMESİ ŞİKAYETİ 
     - "Kurye gelmedi", "alım saati geçti" -> {{ "type": "action", "function": "kurye_gelmedi_sikayeti", "parameters": {{}} }}
 
-    # ÖVGÜ (31. NİYET)
+    # ÖVGÜ 
     - "Teşekkürler", "Hızlı geldi", "Memnun kaldım" -> {{ "type": "action", "function": "hizli_teslimat_ovgu", "parameters": {{}} }}
 
-    # BİLDİRİM AYARI DEĞİŞTİR (37. NİYET)
+    # BİLDİRİM AYARI DEĞİŞTİR 
     - "Bildirim ayarını değiştir", "SMS istemiyorum", "E-posta gelsin" -> {{ "type": "action", "function": "bildirim_ayari_degistir", "parameters": {{ "tip": "...", "musteri_id": "{{user_id}}" }} }}
 
-    # KİMLİK DOĞRULAMA SORUNU (38. NİYET)
+    # KİMLİK DOĞRULAMA SORUNU 
     - Kullanıcı **kimlik doğrulama yapamıyorum, hata alıyorum, bilgilerim yanlış** gibi sorunlardan bahsediyorsa:
       -> {{ "type": "action", "function": "kimlik_dogrulama_sorunu", "parameters": {{}} }}
 
@@ -300,8 +301,8 @@ def process_with_gemini(session_id, user_message, user_sessions):
       -> {{ "type": "action", "function": "kargo_durum_destek", "parameters": {{ "takip_no": "{saved_no}", "musteri_id": "{user_id}" }} }}
 
     # FATURA İTİRAZI
-    - **D2 Çözümü:** "Faturam çok uçuk", "İtiraz ediyorum", "çok yüksek" (Agresif ifadeler dahil)
-    - "Faturam yanlış", "İtiraz ediyorum" -> {{ "type": "action", "function": "kargo_ucret_itiraz", "parameters": {{ "no": "{saved_no}", "fatura_no": "..." }} }}
+    - "Faturam çok uçuk", "İtiraz ediyorum", "çok yüksek", "Faturam yanlış" (Agresif ifadeler dahil):
+    - -> {{ "type": "action", "function": "kargo_ucret_itiraz", "parameters": {{ "no": "{saved_no}", "fatura_no": "..." }} }}
 
     # FATURA BİLGİSİ SORGULAMA (GÖNDERİCİ)
     - "Faturamın durumunu öğrenmek istiyorum. ","Ne kadar ödemiştim?", "Fatura detayı nedir?":
@@ -311,11 +312,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
     - "Evde yokum", "Evde olamayacağım", "Bugün teslim almayacağım", "Teslimatı ertele":
       -> {{ "type": "action", "function": "evde_olmama_bildirimi", "parameters": {{ "no": "{saved_no}" }} }}
 
-    # ÖZEL DURUM: ALICI ADI DEĞİŞTİRME
-    - "Alıcı adını değiştirmek istiyorum", "Alıcının adını yanlış girdim":
-        - EĞER yeni isim belliyse -> {{ "type": "action", "function": "alici_adi_degistir", "parameters": {{ "no": "{saved_no}", "yeni_isim": "..." }} }}
-        - EĞER yeni isim yoksa -> {{ "type": "chat", "reply": "Tabii, kargoyu teslim alacak yeni kişinin Adı ve Soyadı nedir?" }}
-
+    # ALICI ADI VEYA TELEFONU DEĞİŞTİRME
+    - "Alıcının adını yanlış yazmışım Ahmet Yılmaz olacak", "Alıcı telefonunu güncellemek istiyorum 5551234567":
+    - EĞER isim değişecekse -> {{ "type": "action", "function": "alici_bilgisi_guncelle", "parameters": {{ "no": "{saved_no}", "yeni_veri": "Ahmet Yılmaz", "bilgi_turu": "isim" }} }}
+    - EĞER telefon değişecekse -> {{ "type": "action", "function": "alici_bilgisi_guncelle", "parameters": {{ "no": "{saved_no}", "yeni_veri": "5551234567", "bilgi_turu": "telefon" }} }}
+ 
     3. GENEL SOHBET:
       - Merhaba, nasılsın vb. -> {{ "type": "chat", "reply": "Hoş geldiniz. Size nasıl yardımcı olabilirim?" }}
 """
@@ -456,7 +457,8 @@ def process_with_gemini(session_id, user_message, user_sessions):
             elif func == "hasar_kaydi_olustur":
                 system_res = hasar_kaydi_olustur(params.get("no"), params.get("hasar_tipi"), user_id)
             elif func == "kargo_sorgula":
-                system_res = kargo_bilgisi_getir(params.get("no"))
+                aktif_rol = session_data.get('role')
+                system_res = kargo_bilgisi_getir(params.get("no"), user_role=aktif_rol)
             elif func == "tahmini_teslimat":
                 system_res = tahmini_teslimat_saati_getir(params.get("no"))
             elif func == "iade_islemi_baslat":
@@ -475,14 +477,23 @@ def process_with_gemini(session_id, user_message, user_sessions):
                 system_res = evde_olmama_bildirimi(params.get("no"))
             elif func == "supervizor_talebi":
                 system_res = supervizor_talebi(params.get("ad"), params.get("telefon"))
-            elif func == "alici_adi_degistir":
-                system_res = alici_adi_degistir(params.get("no"), params.get("yeni_isim"))
+            elif func == "alici_bilgisi_guncelle":
+                aktif_rol = session_data.get('role')
+                aktif_no = session_data.get('tracking_no') or params.get("no")
+                system_res = alici_bilgisi_guncelle(
+                    aktif_no,
+                    params.get("yeni_veri"),
+                    aktif_rol,
+                    params.get("bilgi_turu")
+                )
             elif func == "gecikme_sikayeti":
                 system_res = gecikme_sikayeti(params.get("no"), user_id)
             elif func == "takip_numarasi_hatasi":
                 system_res = takip_numarasi_hatasi(user_id)
             elif func == "kurye_gelmedi_sikayeti":
-                system_res = kurye_gelmedi_sikayeti()
+                aktif_no = session_data.get('tracking_no') or params.get("takip_no")
+                system_res = kurye_gelmedi_sikayeti(aktif_no, user_id)
+                final_reply = system_res
             elif func == "hizli_teslimat_ovgu":
                 system_res = hizli_teslimat_ovgu()
             elif func == "kimlik_dogrulama_sorunu":

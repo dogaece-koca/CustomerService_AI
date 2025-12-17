@@ -235,23 +235,24 @@ def gecikme_sikayeti(no, musteri_id):
 
             cursor.execute("""
                 UPDATE kargo_takip 
-                SET tahmini_teslim = ? 
-                WHERE takip_no = ?
+                SET tahmini_teslim = ?,
+                    oncelik_puani = 2
+                WHERE takip_no = ? OR siparis_no = ?
             """, (yeni_tarih_str, no))
 
             aciklama = f"{no} nolu kargo gecikti (Eski tarih: {mevcut_tarih_str}). Teslimat {yeni_tarih_str} tarihine ötelendi."
 
             cursor.execute("""
-                INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
-                VALUES (?, ?, ?, ?, datetime('now'), 'ACIK')
-            """, (musteri_id, no, 'Gecikme Şikayeti', aciklama))
+                            INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
+                            VALUES (?, ?, ?, ?, datetime('now'), 'ACIK')
+                        """, (musteri_id, no, 'Gecikme Şikayeti', aciklama))
 
             conn.commit()
 
             return (
                 f"Kontrollerimi sağladım ve haklısınız, kargonuzun {mevcut_tarih_str} tarihinde teslim edilmesi gerekiyordu. "
                 f"Yaşanan aksaklık için çok özür dilerim. Şikayet kaydınızı oluşturdum. "
-                f"Teslimat tarihini sistemde {yeni_tarih_str} (yarın) olarak güncelledim, sürecin takipçisi olacağım.")
+                f"Kargonuzu 'Yüksek Öncelikli' listeye aldım ve teslimat tarihini {yeni_tarih_str} (yarın) olarak güncelledim.")
 
         else:
             return (f"Sistemdeki kontrollerimi yaptım; şu an için bir gecikme görünmüyor. "
@@ -264,7 +265,7 @@ def gecikme_sikayeti(no, musteri_id):
     finally:
         conn.close()
 
-def kargo_bilgisi_getir(no):
+def kargo_bilgisi_getir(no, user_role=None):
     if not no: return "Takip numarası bulunamadı."
 
     conn = get_db_connection()
@@ -279,29 +280,49 @@ def kargo_bilgisi_getir(no):
         teslim_adresi = row['teslim_adresi']
         tahmini_teslim = row['tahmini_teslim']
 
+        # --- GÖNDERİCİYE ÖZEL MESAJLAR ---
+        if user_role == 'gonderici':
+            if durum_adi == 'DAGITIMDA':
+                return (f"Gönderdiğiniz kargo şu an dağıtımda. "
+                        f"Bugün gün içerisinde alıcıya teslim edilmesi planlanıyor.")
 
-        if durum_adi == 'DAGITIMDA':
-            return (f"Harika haber! {no} numaralı kargonuz şu anda dağıtım ekibimizle yola çıktı. "
-                    f"Tahmini olarak bugün {teslim_adresi} adresine teslim edilecektir. Lütfen telefonunuzun yakınınızda olduğundan emin olun.")
+            elif durum_adi == 'TRANSFER':
+                return (f"Gönderdiğiniz kargo yola çıktı ve şu an transfer sürecinde. "
+                        f"Alıcı kargoyu teslim aldığında sisteme düşmüş olacak, ara ara sorgulayarak takip edebilirsiniz. Tahmini varış: {tahmini_teslim}")
 
-        elif durum_adi == 'TRANSFER':
-            return (f"Kargonuz şu an aktarma merkezleri arasında transfer ediliyor. "
-                    f"En kısa sürede varış şubesine ulaşıp dağıtıma çıkacaktır. Tahmini teslim tarihi: {tahmini_teslim}")
+            elif durum_adi == 'TESLIM_EDILDI':
+                return (
+                    f"İşlem tamamlandı. Gönderdiğiniz kargo {tahmini_teslim} tarihinde alıcıya başarıyla teslim edilmiştir.")
 
-        elif durum_adi == 'TESLIM_EDILDI':
-            return (
-                f"Kargonuz zaten teslim edilmiş! {no} numaralı gönderiniz, {tahmini_teslim} tarihinde başarıyla {teslim_adresi} adresine ulaştırılmıştır.")
+            elif durum_adi == 'HAZIRLANIYOR':
+                return f"Siparişiniz alındı, kargo çıkışı için hazırlıklar devam ediyor."
 
-        elif durum_adi == 'HAZIRLANIYOR':
-            return (f"Kargonuzun gönderi hazırlıkları devam ediyor. "
-                    f"En kısa sürede kurye tarafından alınacak ve dağıtım ağına katılacaktır.")
+            else:
+                return f"Gönderinizin durumu: {durum_adi}. Tahmini varış tarihi: {tahmini_teslim}."
 
-        elif durum_adi == 'IPTAL EDILDI':
-            return "Bu kargo, gönderici talebi üzerine sistemden iptal edilmiştir."
-
+        # --- ALICI (VEYA MİSAFİR) İÇİN MESAJLAR ---
         else:
-            # Diğer tüm durumlar için genel yanıt
-            return f"Kargo Durumu: {durum_adi}. Detaylı bilgi: {tahmini_teslim} tarihinde teslim edilmesi bekleniyor."
+            if durum_adi == 'DAGITIMDA':
+                return (f"Harika haber! {no} numaralı kargonuz şu anda dağıtım ekibimizle yola çıktı. "
+                        f"Tahmini olarak bugün {teslim_adresi} adresine teslim edilecektir. Lütfen telefonunuzun yakınınızda olduğundan emin olun.")
+
+            elif durum_adi == 'TRANSFER':
+                return (f"Kargonuz şu an aktarma merkezleri arasında transfer ediliyor. "
+                        f"En kısa sürede varış şubesine ulaşıp dağıtıma çıkacaktır. Tahmini teslim tarihi: {tahmini_teslim}")
+
+            elif durum_adi == 'TESLIM_EDILDI':
+                return (
+                    f"Kargonuz zaten teslim edilmiş! {no} numaralı gönderiniz, {tahmini_teslim} tarihinde başarıyla {teslim_adresi} adresine ulaştırılmıştır.")
+
+            elif durum_adi == 'HAZIRLANIYOR':
+                return (f"Kargonuzun gönderi hazırlıkları devam ediyor. "
+                        f"En kısa sürede kurye tarafından alınacak ve dağıtım ağına katılacaktır.")
+
+            elif durum_adi == 'IPTAL EDILDI':
+                return "Bu kargo iptal edilmiştir."
+
+            else:
+                return f"Kargo Durumu: {durum_adi}. Detaylı bilgi: {tahmini_teslim} tarihinde teslim edilmesi bekleniyor."
 
     except Exception as e:
         return f"Sistem hatası: {e}"
@@ -319,7 +340,6 @@ def tahmini_teslimat_saati_getir(no):
         return f"Tahmini teslimat: {row['tahmini_teslim']}, 09:00 - 18:00 saatleri arası."
     finally:
         conn.close()
-
 
 def hasar_kaydi_olustur(takip_no, hasar_tipi, musteri_id):
     if not takip_no: return "Takip numarası gerekli."
@@ -463,22 +483,70 @@ def adres_degistir(no, yeni_adres):
         conn.close()
 
 def yanlis_teslimat_bildirimi(no, dogru_adres, musteri_id):
-    if not no or not dogru_adres: return "Bilgi eksik."
+    if not no or not dogru_adres:
+        return "İşlem yapabilmem için takip numarasını ve doğru adresi belirtmelisiniz."
+
     safe_id = musteri_id if musteri_id else 0
     conn = get_db_connection()
+    cursor = conn.cursor()
+
     try:
-        row = conn.execute("SELECT teslim_adresi FROM kargo_takip WHERE takip_no = ? OR siparis_no = ?",
-                           (no, no)).fetchone()
-        mevcut = row['teslim_adresi'] if row else "Bilinmiyor"
+        query = """
+            SELECT k.takip_no, k.durum_id, k.teslim_adresi, h.durum_adi 
+            FROM kargo_takip k
+            JOIN hareket_cesitleri h ON k.durum_id = h.id
+            WHERE k.takip_no = ? OR k.siparis_no = ?
+        """
+        row = cursor.execute(query, (no, no)).fetchone()
+
+        if not row:
+            return "Sistemde bu numaraya ait bir kayıt bulunamadı."
+
+        mevcut_adres = row['teslim_adresi']
+        durum_adi = row['durum_adi']
+        gercek_takip_no = row['takip_no']
+
+        update_query = """
+            UPDATE kargo_takip 
+            SET teslim_adresi = ?, 
+                oncelik_puani = 3 
+            WHERE takip_no = ?
+        """
+        cursor.execute(update_query, (dogru_adres, gercek_takip_no))
+
+        hareket_ekle_query = """
+            INSERT INTO kargo_hareketleri (takip_no, islem_tarihi, islem_yeri, islem_tipi, aciklama, hedef_sube_id)
+            VALUES (?, datetime('now'), 'Çağrı Merkezi / AI', 'Adres Düzeltme', ?, 0)
+        """
+        aciklama_hareket = f"Müşteri talebiyle adres revize edildi. Eski: {mevcut_adres[:10]}..."
+        cursor.execute(hareket_ekle_query, (gercek_takip_no, aciklama_hareket))
+
         bugun = datetime.now().strftime('%Y-%m-%d')
-        conn.execute(
-            "INSERT INTO sikayetler (siparis_no, olusturan_musteri_id, konu, tarih, durum) VALUES (?, ?, ?, ?, 'ACIL_INCELENECEK')",
-            (no, safe_id, f"YANLIŞ TESLİMAT: {mevcut} yerine {dogru_adres}", bugun))
+        sikayet_query = """
+            INSERT INTO sikayetler (siparis_no, olusturan_musteri_id, konu, tarih, durum, tip, aciklama) 
+            VALUES (?, ?, ?, ?, 'ACIL_MUDAHALE', 'YANLIS_ADRES', ?)
+        """
+        konu_basligi = f"[KRİTİK] Yanlış Adres Bildirimi - {durum_adi}"
+        detayli_aciklama = f"Kullanıcı adresin yanlış olduğunu bildirdi. Sistem, adresi '{dogru_adres}' olarak güncelledi. Kurye uyarılmalı."
+
+        cursor.execute(sikayet_query, (no, safe_id, konu_basligi, bugun, detayli_aciklama))
+
         conn.commit()
-        return f"Yanlış teslimat bildirimi alındı. Yönlendirme yapılıyor."
+
+        if "TESLIM" in durum_adi:
+            return (f"Dikkat! Kargonuz sistemde 'Teslim Edildi' görünüyor ancak adres hatası bildirdiniz. "
+                    f"Acil durum kaydı (#KRITIK) oluşturarak bölge operasyon müdürüne ilettim. "
+                    f"Hatalı teslimatı geri almak için ekiplerimiz hemen harekete geçecektir.")
+        else:
+            return (f"Endişelenmeyin, müdahale ettim. "
+                    f"Sistemdeki hatalı adresi sildim ve '{dogru_adres}' olarak güncelledim. "
+                    f"Kuryemize 'Adres Değişikliği' uyarısını ve yeni rotayı anlık olarak ilettim.")
+
+    except Exception as e:
+        print(f"Hata Detayı: {e}")
+        return "Sistemsel bir hata oluştu, ancak talebinizi not ettim. Lütfen daha sonra tekrar deneyin."
     finally:
         conn.close()
-
 
 def sube_sorgula(lokasyon):
     conn = get_db_connection()
@@ -744,47 +812,74 @@ def fatura_bilgisi_gonderici(siparis_no, musteri_id):
     finally:
         conn.close()
 
-def evde_olmama_bildirimi(takip_no):
-    if not takip_no:
-        return "İşlem yapabilmem için kargo takip numarasını belirtmelisiniz."
+def evde_olmama_bildirimi(no):
+    if not no:
+        return "İşlem yapabilmem için kargo takip veya sipariş numarasını belirtmelisiniz."
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT durum_id, tahmini_teslim FROM kargo_takip WHERE takip_no = ?", (takip_no,))
-    kargo = cursor.fetchone()
-
-    if not kargo:
-        conn.close()
-        return f"{takip_no} numaralı bir kargo bulunamadı."
-
-    durum_id = kargo[0]
-    eski_tarih = kargo[1]
-
-    if durum_id == 4:
-        conn.close()
-        return f"{takip_no} numaralı kargo zaten TESLİM EDİLMİŞ, tarih değişikliği yapılamaz."
-
-    bugun = datetime.now()
-    yeni_tarih_obj = bugun + timedelta(days=2)
-    yeni_tarih_str = yeni_tarih_obj.strftime('%Y-%m-%d')
-
     try:
-        cursor.execute('''
+        query = """
+            SELECT k.takip_no, k.durum_id, k.tahmini_teslim, h.durum_adi 
+            FROM kargo_takip k
+            JOIN hareket_cesitleri h ON k.durum_id = h.id
+            WHERE k.takip_no = ? OR k.siparis_no = ?
+        """
+        row = cursor.execute(query, (no, no)).fetchone()
+
+        if not row:
+            return f"Sistemde bu numaraya ({no}) ait bir kayıt bulunamadı."
+
+        durum_id = row['durum_id']
+        eski_tarih = row['tahmini_teslim']
+        durum_adi = row['durum_adi']
+        gercek_takip_no = row['takip_no']
+
+        if "TESLIM" in durum_adi:
+            return f"Kargonuz zaten teslim edilmiş görünüyor, erteleme işlemi yapılamaz."
+
+        bugun = datetime.now()
+        yeni_tarih_obj = bugun + timedelta(days=1)
+        yeni_tarih_str = yeni_tarih_obj.strftime('%Y-%m-%d')
+
+
+        if "DAGITIM" in durum_adi or "KURYE" in durum_adi:
+            yeni_durum_id = 2
+            aciklama_hareket = "Kurye Sahada Uyarıldı: Müşteri evde yok, teslimat durduruldu."
+            operasyon_mesaji = "Kuryemiz şu an dağıtımda olduğu için kendisine 'Teslimatı İptal Et' uyarısı gönderdim."
+
+        else:
+            yeni_durum_id = durum_id
+            aciklama_hareket = "Müşteri talebi üzerine teslimat tarihi güncellendi."
+            operasyon_mesaji = "Talebiniz sisteme işlendi."
+
+        update_query = """
             UPDATE kargo_takip 
-            SET tahmini_teslim = ? 
+            SET tahmini_teslim = ?, 
+                durum_id = ?,
+                oncelik_puani = 2 
             WHERE takip_no = ?
-        ''', (yeni_tarih_str, takip_no))
+        """
+        cursor.execute(update_query, (yeni_tarih_str, yeni_durum_id, gercek_takip_no))
+
+        log_query = """
+            INSERT INTO kargo_hareketleri (takip_no, islem_tarihi, islem_yeri, islem_tipi, aciklama, hedef_sube_id)
+            VALUES (?, datetime('now'), 'Mobil Asistan', 'Erteleme', ?, 0)
+        """
+        cursor.execute(log_query, (gercek_takip_no, aciklama_hareket))
+
         conn.commit()
-        mesaj = (f"{takip_no} numaralı kargonuz için 'Evde Yokum' bildirimi alındı.\n"
-                 f"Eski Tarih: {eski_tarih} -> Yeni Teslim Tarihi: {yeni_tarih_str} olarak güncellenmiştir.\n"
-                 f"En yakın şubeden de teslim alabilirsiniz.")
+
+        return (f"{operasyon_mesaji}\n"
+                f"{gercek_takip_no} numaralı kargonuzun teslimat tarihi {eski_tarih} yerine {yeni_tarih_str} olarak planlanmıştır.\n"
+                f"Dilerseniz bu tarihten önce en yakın şubemizden de teslim alabilirsiniz.")
+
     except Exception as e:
-        mesaj = f"Bir hata oluştu: {e}"
+        print(f"Hata: {e}")
+        return "Sistemsel bir hata oluştu, erteleme işlemi yapılamadı."
     finally:
         conn.close()
-
-    return mesaj
 
 def supervizor_talebi(ad, telefon):
     if not ad or not telefon:
@@ -829,9 +924,57 @@ def supervizor_talebi(ad, telefon):
     finally:
         conn.close()
 
+def kurye_gelmedi_sikayeti(no, musteri_id):
+    if not no:
+        return "Hangi gönderi/alım için kurye beklemiştiniz? Takip veya sipariş numarasını belirtirseniz hemen kontrol edip ekibe ileteyim."
 
-def kurye_gelmedi_sikayeti():
-    return "Kuryenin size gelmemesiyle ilgili şikayetiniz alınmıştır. En yakın zamanda yeni bir teslimat/alım saati için sizi arayacağız."
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        query = "SELECT durum_id, tahmini_teslim FROM kargo_takip WHERE takip_no = ? OR siparis_no = ?"
+        row = cursor.execute(query, (no, no)).fetchone()
+
+        if not row:
+            return "Sistemde bu numaraya ait aktif bir kayıt bulamadım. Numarayı kontrol eder misiniz?"
+
+        mevcut_durum_id = row['durum_id']
+
+        if mevcut_durum_id == 4:
+            return "Sistemde kargonuz teslim edilmiş görünüyor. Eğer teslim almadıysanız bu ciddi bir durum, hemen 'Teslim almadım' kaydı oluşturuyorum."
+
+        yarin = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        cursor.execute("""
+                    UPDATE kargo_takip 
+                    SET tahmini_teslim = ?,
+                        oncelik_puani = 3
+                    WHERE takip_no = ? OR siparis_no = ?
+                """, (yarin, no, no))
+
+        konu = f"[ACİL-KURYE GELMEDİ] {no} nolu kargo için müşteri adreste beklemiş ancak kurye uğramamış."
+
+        cursor.execute("""
+            INSERT INTO sikayetler (siparis_no, olusturan_musteri_id, konu, tip, tarih, durum) 
+            VALUES (?, ?, ?, 'KURYE_GELMEDI', datetime('now'), 'ACIL_ISLEM')
+        """, (no, musteri_id, konu))
+
+        cursor.execute("""
+            INSERT INTO supervisor_gorusmeleri (musteri_id, girilen_ad, girilen_telefon, talep_tarihi, durum)
+            VALUES (?, 'Sistem Oto', 'Kurye Sikayeti', datetime('now'), 'OTOMATIK_ESKALASYON')
+        """, (musteri_id,))
+
+        conn.commit()
+
+        return (f"Yaşattığımız bu aksaklık için kurumum adına çok özür dilerim. "
+                f"Şikayet kaydınızı 'ACİL' koduyla operasyon müdürüne ilettim. "
+                f"{no} numaralı işleminizi yarına ({yarin}) erteledim ve 'Öncelikli Dağıtım/Alım' listesine ekledim. "
+                f"Yarın gün içerisinde mutlaka adresinize gelinecektir.")
+
+    except Exception as e:
+        return f"Sistem hatası: {e}"
+    finally:
+        conn.close()
 
 def hizli_teslimat_ovgu():
     return "Hizmetimizden memnun kalmanıza çok sevindik! Güzel geri bildiriminiz için teşekkür ederiz. İyi günler dileriz."
@@ -840,5 +983,62 @@ def kimlik_dogrulama_sorunu(): return "Kimlik doğrulama sorunları genellikle y
 
 def yurt_disi_kargo_kosul(): return "Yurt dışı gönderileri için fiyatlandırma ülkeye göre değişir. Süreler ve gümrük işlemleriyle ilgili detaylı bilgi ve gerekli belge listesi size SMS ile gönderilmiştir."
 
-def alici_adi_degistir(no, yeni_isim):
-    return f"Alıcı adı '{yeni_isim}' olarak güncellendi."
+def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
+    if user_role != 'gonderici':
+        return "Güvenlik gereği alıcı bilgilerini (isim/telefon) sadece kargoyu gönderen kişi değiştirebilir."
+
+    if not no or not yeni_veri:
+        return "İşlem için takip numarası ve yeni bilgi gereklidir."
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        query = """
+            SELECT s.alici_id, m.ad_soyad, m.telefon, k.takip_no 
+            FROM siparisler s
+            JOIN musteriler m ON s.alici_id = m.musteri_id
+            LEFT JOIN kargo_takip k ON s.siparis_no = k.siparis_no
+            WHERE k.takip_no = ? OR s.siparis_no = ?
+        """
+        row = cursor.execute(query, (no, no)).fetchone()
+
+        if not row:
+            return "Sistemde bu numaraya ait bir kayıt bulunamadı."
+
+        alici_id = row['alici_id']
+        eski_ad = row['ad_soyad']
+        eski_tel = row['telefon']
+        gercek_takip_no = row['takip_no']
+
+        if bilgi_turu == "isim":
+            cursor.execute("UPDATE musteriler SET ad_soyad = ? WHERE musteri_id = ?", (yeni_veri, alici_id))
+            aciklama_log = f"Alıcı Adı Düzeltildi (Gönderici Talebi): {eski_ad} -> {yeni_veri}"
+            mesaj = f"Alıcı adı başarıyla '{yeni_veri}' olarak güncellendi."
+
+        elif bilgi_turu == "telefon":
+            temiz_tel = re.sub(r'[^0-9]', '', str(yeni_veri))
+            if len(temiz_tel) > 10: temiz_tel = temiz_tel[-10:]
+
+            cursor.execute("UPDATE musteriler SET telefon = ? WHERE musteri_id = ?", (temiz_tel, alici_id))
+            aciklama_log = f"Alıcı Tel Düzeltildi (Gönderici Talebi): {eski_tel} -> {temiz_tel}"
+            mesaj = f"Alıcı telefon numarası güncellendi. Yeni numara: {temiz_tel}"
+
+        else:
+            return "Geçersiz işlem türü."
+
+        if gercek_takip_no:
+            log_query = """
+                INSERT INTO kargo_hareketleri (takip_no, islem_tarihi, islem_yeri, islem_tipi, aciklama, hedef_sube_id)
+                VALUES (?, datetime('now'), 'Çağrı Merkezi', 'Bilgi Güncelleme', ?, 0)
+            """
+            cursor.execute(log_query, (gercek_takip_no, aciklama_log))
+
+        conn.commit()
+        return mesaj
+
+    except Exception as e:
+        print(f"Hata: {e}")
+        return "Sistemsel bir hata oluştu."
+    finally:
+        conn.close()
