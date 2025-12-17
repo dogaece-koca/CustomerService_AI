@@ -1,8 +1,11 @@
+from sklearn.linear_model import LinearRegression
 import pandas as pd
 import os
-from sklearn.linear_model import LinearRegression
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.naive_bayes import MultinomialNB
+import re
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
 
 def teslimat_suresi_hesapla(mesafe, agirlik):
     try:
@@ -43,69 +46,89 @@ def teslimat_suresi_hesapla(mesafe, agirlik):
         return f"Model Hatası: {e}"
 
 
-def duygu_analizi_yap(gelen_cumle):
+EGITILMIS_MODEL = None
+
+
+def metin_temizle(metin):
+    if not isinstance(metin, str): return ""
+
+    metin = re.sub(r'<.*?>', '', metin)
+    metin = re.sub(r'[^a-zA-ZçÇğĞıİöÖşŞüÜ\s]', '', metin)
+    metin = metin.lower()
+    metin = re.sub(r'\s+', ' ', metin).strip()
+
+    return metin
+
+def modeli_egit():
+    global EGITILMIS_MODEL
+
+    CSV_DOSYA_ADI = 'duygu_analizi.csv'
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Ana dizini bul
+    csv_path = os.path.join(base_dir, CSV_DOSYA_ADI)
+
+    if not os.path.exists(csv_path):
+        print(f"UYARI: {csv_path} bulunamadı.")
+        return None
+
     try:
-        CSV_DOSYA_ADI = 'duygu_analizi.csv'
-        SUTUN_YORUM = 'text'
-        SUTUN_ETIKET = 'label'
-
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        base_dir = os.path.dirname(current_dir)
-        csv_path = os.path.join(base_dir, CSV_DOSYA_ADI)
-
-        if not os.path.exists(csv_path):
-            return "NÖTR (Dosya Yok)", 0
-
         try:
             df = pd.read_csv(csv_path, encoding='utf-8')
         except:
             df = pd.read_csv(csv_path, encoding='utf-16')
 
-        df = df.dropna(subset=[SUTUN_YORUM, SUTUN_ETIKET])
-        df[SUTUN_YORUM] = df[SUTUN_YORUM].astype(str)
+        if 'text' not in df.columns or 'label' not in df.columns:
+            print("CSV formatı hatalı. 'text' ve 'label' sütunları olmalı.")
+            return None
 
-        # Vectorizer ayarları (Küçük harf duyarlılığı vs.)
-        vectorizer = CountVectorizer()
-        X = vectorizer.fit_transform(df[SUTUN_YORUM])
-        y = df[SUTUN_ETIKET]
+        df = df.dropna()
+        df['clean_text'] = df['text'].apply(metin_temizle)
 
-        clf = MultinomialNB()
-        clf.fit(X, y)
+        vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=5000)
+        clf = LogisticRegression(max_iter=1000)
+        model = make_pipeline(vectorizer, clf)
 
-        # --- DÜZELTME BAŞLANGICI ---
+        model.fit(df['clean_text'], df['label'])
 
-        # 1. ADIM: Gelen cümleyi vektöre çevir
-        gelen_vektor = vectorizer.transform([gelen_cumle])
+        EGITILMIS_MODEL = model
+        print("Duygu Analizi Modeli Eğitildi (N-Grams & TF-IDF)")
+        return model
 
-        # KONTROL 1: HİÇBİR KELİME EŞLEŞTİ Mİ?
-        # Eğer kullanıcının yazdığı kelimelerin hiçbiri veri setinde yoksa (nnz = number of non-zero elements)
-        # Modelin rastgele (veya çoğunluk sınıfına göre) atmasina izin verme, NÖTR dön.
-        if gelen_vektor.nnz == 0:
-            return "NÖTR (Tanımsız Kelime)", 0
+    except Exception as e:
+        print(f"Model Eğitme Hatası: {e}")
+        return None
 
-        # 2. ADIM: Sadece tahmin değil, olasılıkları da al
-        # classes_ modelin tanıdığı sınıfları (örn: ['Negatif', 'Olumlu', 'Tarafsız']) tutar
-        olasiliklar = clf.predict_proba(gelen_vektor)[0]
-        max_olasilik = np.max(olasiliklar)  # En yüksek güven skoru (örn: 0.45 veya 0.90)
-        tahmin_index = np.argmax(olasiliklar)
-        tahmin = clf.classes_[tahmin_index]
 
-        sonuc_str = str(tahmin)
+def duygu_analizi_yap(gelen_cumle):
+    global EGITILMIS_MODEL
 
-        # KONTROL 2: GÜVEN EŞİĞİ (THRESHOLD)
-        # Eğer model %60'tan az eminse, risk alma NÖTR de.
-        if max_olasilik < 0.60:
+    if EGITILMIS_MODEL is None:
+        EGITILMIS_MODEL = modeli_egit()
+        if EGITILMIS_MODEL is None:
+            return "NÖTR (Model Yok)", 0
+
+    try:
+        temiz_cumle = metin_temizle(gelen_cumle)
+
+        if not temiz_cumle or len(temiz_cumle) < 3:
+            return "NÖTR (Yetersiz Veri)", 0
+
+        olasiliklar = EGITILMIS_MODEL.predict_proba([temiz_cumle])[0]
+        siniflar = EGITILMIS_MODEL.classes_
+
+        max_index = np.argmax(olasiliklar)
+        tahmin = siniflar[max_index]
+        guven_skoru = olasiliklar[max_index]
+
+        if guven_skoru < 0.55:
             return "NÖTR (Düşük Güven)", 0
 
-        # --- DÜZELTME BİTİŞİ ---
-
-        if sonuc_str in ["Olumlu", "Pozitif", "1", "positive", "iyi"]:
+        if tahmin in ["Olumlu", "Pozitif", "1"]:
             return "MUTLU (POZİTİF)", 2
-        elif sonuc_str in ["Olumsuz", "Negatif", "-1", "negative", "kötü"]:
+        elif tahmin in ["Olumsuz", "Negatif", "-1"]:
             return "KIZGIN (NEGATİF)", -2
         else:
             return "NÖTR", 0
 
     except Exception as e:
-        print(f"ML Hatası: {e}")
+        print(f"Analiz Hatası: {e}")
         return "NÖTR", 0

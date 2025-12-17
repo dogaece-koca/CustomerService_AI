@@ -184,7 +184,7 @@ def veri_uret():
         os.path.join(CSV_FOLDER, 'kampanyalar.csv'), index=False)
 
     # Tarife
-    tarife = [[1, 5, 10, 100, 5, 20, 30, 200]]
+    tarife = [[1, 5, 10, 100, 5, 5, 10, 200]]
     pd.DataFrame(tarife, columns=['id', 'kisa_mesafe_km_ucret', 'uzak_mesafe_km_ucret', 'taban_desi_ucreti',
                                   'taban_desi_limiti', 'kisa_mesafe_ek_desi_ucret', 'uzak_mesafe_ek_desi_ucret',
                                   'mesafe_siniri_km']).to_csv(os.path.join(CSV_FOLDER, 'ucretlendirme_tarife.csv'),

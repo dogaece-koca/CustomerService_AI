@@ -211,13 +211,6 @@ def sikayet_olustur(no, konu, musteri_id):
     finally:
         conn.close()
 
-
-from datetime import datetime, timedelta  # En tepeye eklemediysen ekle
-
-from datetime import datetime, timedelta
-import sqlite3  # Kullanılan kütüphaneye göre değişebilir
-
-
 def gecikme_sikayeti(no, musteri_id):
     if not no:
         return "Gecikme şikayetinizle ilgilenebilmemiz için lütfen sipariş veya takip numaranızı belirtin."
@@ -287,7 +280,6 @@ def kargo_bilgisi_getir(no):
         teslim_adresi = row['teslim_adresi']
         tahmini_teslim = row['tahmini_teslim']
 
-        # KARGO DURUMUNA GÖRE DAHA DOĞAL YANIT VERME
 
         if durum_adi == 'DAGITIMDA':
             return (f"Harika haber! {no} numaralı kargonuz şu anda dağıtım ekibimizle yola çıktı. "
@@ -329,19 +321,46 @@ def tahmini_teslimat_saati_getir(no):
     finally:
         conn.close()
 
-def hasar_kaydi_olustur(no, hasar_tipi, musteri_id):
-    if not no: return "Takip numarası bulunamadı."
-    if not hasar_tipi: return "Lütfen hasarın türünü (Kırık, Ezik, Islak) belirtin."
-    safe_id = musteri_id if musteri_id else 0
+
+def hasar_kaydi_olustur(takip_no, hasar_tipi, musteri_id):
+    if not takip_no: return "Takip numarası gerekli."
+    if not hasar_tipi: return "Hasar tipi belirtmelisiniz."
+
     conn = get_db_connection()
+    cursor = conn.cursor()
+
     try:
+        cursor.execute("SELECT id FROM hareket_cesitleri WHERE durum_adi LIKE '%Teslim%'")
+        hedef_durum = cursor.fetchone()
+
+        if not hedef_durum:
+            return "Sistem hatası: 'Teslim Edildi' durumunun ID karşılığı bulunamadı."
+
+        teslim_edildi_id = hedef_durum['id']  # Örn: 4 dönecektir
+
+        cursor.execute("SELECT durum_id, siparis_no FROM kargo_takip WHERE takip_no = ?", (takip_no,))
+        kargo = cursor.fetchone()
+
+        if not kargo:
+            return "Kayıt bulunamadı."
+
+        mevcut_durum_id = kargo['durum_id']  # Bu bir sayı (INTEGER)
+        siparis_no = kargo['siparis_no']
+
+        if mevcut_durum_id != teslim_edildi_id:
+            return (f"İşlem reddedildi. Kargonuz sistemde henüz teslim edilmiş görünmüyor "
+                    f"Sadece teslim alınan kargolar için hasar kaydı açılabilir.")
+
         bugun = datetime.now().strftime('%Y-%m-%d')
-        conn.execute(
-            "INSERT INTO hasar_bildirimleri (siparis_no, olusturan_musteri_id, hasar_tipi, tarih) VALUES (?, ?, ?, ?)",
-            (no, safe_id, hasar_tipi, bugun))
+        cursor.execute("""
+            INSERT INTO hasar_bildirimleri 
+            (siparis_no, olusturan_musteri_id, hasar_tipi, tazminat_durumu, tarih) 
+            VALUES (?, ?, ?, 'INCELEMEDE', ?)
+        """, (siparis_no, musteri_id, hasar_tipi, bugun))
+
         conn.commit()
-        cursor = conn.execute("SELECT last_insert_rowid()")
-        return f"Hasar bildirimi alındı. Dosya No: #{cursor.fetchone()[0]}."
+        return f"Hasar bildirimi başarıyla oluşturuldu. Dosya No: #{cursor.lastrowid}"
+
     except Exception as e:
         return f"Hata: {e}"
     finally:

@@ -58,53 +58,44 @@ def mesafe_hesapla_ai(cikis, varis):
 
 
 def vergi_hesapla_ai(urun_kategorisi, fiyat, hedef_ulke):
-    if not genai: return "AI servisi kapalı."
+    print(f"DEBUG: vergi_hesapla_ai çalıştı -> {urun_kategorisi}, {fiyat}, {hedef_ulke}")
+
+    if 'genai' not in globals():
+        return "Üzgünüm, şu an yapay zeka servisine erişemiyorum."
 
     try:
-
         model = genai.GenerativeModel('gemini-2.5-flash')
 
         prompt = f"""
-        GÖREV: Bir Gümrük Müşaviri gibi davran. Aşağıdaki gönderi için TAHMİNİ gümrük vergisi ve toplam maliyeti hesapla.
+        GÖREV: Bir gümrük danışmanı gibi davran ve müşteriye yanıt ver.
 
-        KESİN KURAL: Eğer 'urun_kategorisi', 'fiyat' veya 'hedef_ulke' parametrelerinden biri bile eksikse, JSON döndürme. SADECE eksik olan bilgiyi SOR.
-
-        DETAYLAR:
+        GİRDİLER:
         - Ürün: {urun_kategorisi}
-        - Fiyat: {fiyat} Euro (Varsayılan para birimi Euro)
+        - Fiyat: {fiyat}
         - Hedef Ülke: {hedef_ulke}
+        
 
         KURALLAR:
-        1. O ülkenin güncel KDV/Gümrük oranlarını (tahmini) baz al.
-        2. Muafiyet limiti altındaysa vergiyi 0 yaz.
-        3. ÇIKTI SADECE VE SADECE JSON FORMATINDA OLSUN (Tüm bilgiler tam ise).
+        1. Hedef ülkenin para birimini ($, €, £) tespit et ve hesaplamayı o birimle yap.
+        2. Tahmini bir gümrük vergisi hesapla.
+        3. ÇIKTI FORMATI: Sadece müşteriye söylenecek tek ve net bir cümle kur.
+        4. EĞER BİLGİ EKSİKSE: (Örn: Fiyat yoksa) Kibarca eksik bilgiyi sor.
+        5. ASLA JSON veya kod bloğu kullanma. Sadece düz yazı yaz.
 
-        JSON FORMATI:
-        {{
-            "vergi_orani": "Tahmini Oran",
-            "vergi_tutari": "Hesaplanan Tutar Euro",
-            "toplam_tutar": "Toplam Maliyet Euro",
-            "aciklama": "Vergi hesaplama açıklaması."
-        }}
+        ÖRNEK CEVAP TİPİ:
+        "{hedef_ulke} gönderiniz için tahmini 25 € gümrük vergisi çıkıyor."
         """
 
         response = model.generate_content(prompt)
-        text_res = response.text.strip().replace("```json", "").replace("```", "")
+        text_res = response.text.strip()
 
-        try:
-            data = json.loads(text_res)
-        except json.JSONDecodeError:
-            return f"HATA|AI Vergi Hesaplayıcısı: {text_res}"
+        text_res = text_res.replace("**", "").replace("```", "")
 
-        return f"""HESAPLAMA SONUCU ({hedef_ulke}):
-        Ürün: {urun_kategorisi} | Vergi Oranı: {data['vergi_orani']} | Vergi Tutarı: {data['vergi_tutari']}
-        TOPLAM MALİYET: {data['toplam_tutar']}
-        Bilgi: {data['aciklama']}"""
+        return text_res
 
     except Exception as e:
-        print(f"Vergi AI Hatası: {e}")
-        return f"Şu an gümrük veritabanına erişilemiyor. Teknik Hata: {e}"
-
+        print(f"AI Hatası: {e}")
+        return "Vergi hesaplama servisinde geçici bir yoğunluk var, lütfen daha sonra tekrar deneyin."
 
 def process_with_gemini(session_id, user_message, user_sessions):
     if not genai: return "AI kapalı."
@@ -143,9 +134,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
     final_user_message = user_message
     if not is_verified and pending_intent:
-        # Doğrulanmamışsa ve bekleyen bir niyet varsa, geçmişi AI'ya hatırlat
-        formatted_history_for_context = "\n".join(history[-4:])  # Son 4 konuşmayı ekle
-        # AI'ya hem son mesajı hem de bağlamı zorla iletiyoruz.
+        formatted_history_for_context = "\n".join(history[-4:])
         final_user_message = f"{user_message} (NOT: Kullanıcı daha önce '{pending_intent}' yapmak istediğini belirtti ve parça parça bilgi veriyor. Eksikleri tamamladıysa doğrulama yap. Geçmiş: {formatted_history_for_context})"
 
     duygu_durumu, duygu_skoru = duygu_analizi_yap(user_message)
@@ -275,11 +264,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
     - Kullanıcı **kimlik doğrulama yapamıyorum, hata alıyorum, bilgilerim yanlış** gibi sorunlardan bahsediyorsa:
       -> {{ "type": "action", "function": "kimlik_dogrulama_sorunu", "parameters": {{}} }}
 
-    # VERGİ HESAPLAMA (D3)
+    # VERGİ HESAPLAMA 
     - "Laptop Almanya'ya gidiyor fiyat 1000 Euro", "Almanya'ya ne kadar vergi çıkar?"
       -> {{ "type": "action", "function": "vergi_hesapla_ai", "parameters": {{ "urun_kategorisi": "...", "fiyat": "...", "hedef_ulke": "..." }} }}
 
-    # YURT DIŞI KARGO KOŞULLARI (39. NİYET)
+    # YURT DIŞI KARGO KOŞULLARI 
     - "Yurt dışı kargo", "gümrük", "ülke koşulları" -> {{ "type": "action", "function": "yurt_disi_kargo_kosul", "parameters": {{}} }}
 
     # GENEL MÜŞTERİ ŞİKAYETİ (Kurye Kaba, Yanlış Faturalandırma vb.)
@@ -287,7 +276,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
       - Konu belli değilse -> {{ "type": "chat", "reply": "Anlıyorum, yaşadığınız sorun nedir? Lütfen şikayetinizi kısaca belirtin." }}
       - Konu belliyse -> {{ "type": "action", "function": "sikayet_olustur", "parameters": {{ "no": "{{saved_no}}", "konu": "..." }} }}
 
-    # HASAR BİLDİRİMİ (YENİ - TAZMİNAT)
+    # HASAR BİLDİRİMİ (TAZMİNAT)
     - "Kargom kırık geldi", "Paket ezilmiş", "Ürün hasarlı", "Islanmış", "Parçalanmış":
       - EĞER hasar tipi belliyse -> {{ "type": "action", "function": "hasar_kaydi_olustur", "parameters": {{ "no": "{saved_no}", "hasar_tipi": "..." }} }}
       - EĞER tip belli değilse -> {{ "type": "chat", "reply": "Çok üzgünüz. Hasarın türü nedir? (Kırık, Ezik, Islak, Kayıp)" }}
@@ -337,19 +326,19 @@ def process_with_gemini(session_id, user_message, user_sessions):
     try:
         result = model.generate_content(full_prompt)
         text_response = result.text.replace("```json", "").replace("```", "").strip()
-        # --- DEBUG NOKTASI 1: AI NE ÜRETTİ? ---
+        # --- DEBUG NOKTASI---
         print(f"\n🔥🔥🔥 [DEBUG] AI HAM CEVAP: {text_response}")
         # --------------------------------------
 
         data = json.loads(text_response)
         final_reply = ""
-        func = None  # Hata önleyici
+        func = None
 
         if data.get("type") == "action":
             func = data.get("function")
             params = data.get("parameters", {})
 
-            # --- DEBUG NOKTASI 2: HANGİ FONKSİYON SEÇİLDİ? ---
+            # --- DEBUG NOKTASI  ---
             print(f"✅ [DEBUG] SEÇİLEN FONKSİYON: {func}")
             print(f"🔍 [DEBUG] PARAMETRELER: {params}")
             # -------------------------------------------------
@@ -419,24 +408,13 @@ def process_with_gemini(session_id, user_message, user_sessions):
                 except Exception as e:
                     print(f"Kampanya AI Hatası: {e}")
                     final_reply = f"Şu anda aktif kampanyalarımız şunlardır: {res}"
-
             elif func == "vergi_hesapla_ai":
-                res = vergi_hesapla_ai(params.get("urun_kategorisi"), params.get("fiyat"), params.get("hedef_ulke"))
-
-                try:
-                    # Önce AI'dan yanıtı al
-                    raw_ai_response = model.generate_content(
-                        f"GÖREV: Müşteriye vergi sonucunu söyle. VERİ: {res}. KESİN KURALLAR: ASLA başlık atma. ASLA madde işareti koyma. ASLA açıklama yapma. SADECE tek bir cümle kur. İSTENEN ÇIKTI FORMATI: '{params.get('hedef_ulke')} gönderiniz için tahmini [VERGİ TUTARI] vergi çıkıyor, toplam maliyetiniz [TOPLAM] olacaktır.'").text.strip()
-
-                    # Eğer AI'dan HATA|AI Vergi Hesaplayıcısı: şeklinde bir dönüş varsa (eksik parametre), onu kullan
-                    if raw_ai_response.startswith("HATA|AI Vergi Hesaplayıcısı:"):
-                        final_reply = raw_ai_response.split(":")[1].strip()  # Eksik bilgiyi soran metin
-                    else:
-                        final_reply = raw_ai_response
-
-                except Exception as e:
-                    final_reply = f"Üzgünüm, vergi hesaplama sırasında bir hata oluştu. Hata Kodu: {e}"
-
+                system_res = vergi_hesapla_ai(
+                    params.get("urun_kategorisi"),
+                    params.get("fiyat"),
+                    params.get("hedef_ulke")
+                )
+                final_reply = system_res
             elif func == "kargo_ucret_itiraz":
                 system_res = kargo_ucret_itiraz(saved_no, params.get("fatura_no"), user_id)
             elif func == "yanlis_teslimat_bildirimi":
@@ -515,7 +493,6 @@ def process_with_gemini(session_id, user_message, user_sessions):
                         system_res = "Şehirler arası mesafe hesaplanamadı, lütfen tekrar deneyin."
 
             if func != "kimlik_dogrula" and func != "kampanya_sorgula" and func != "vergi_hesapla_ai":
-                # H2 ÇÖZÜMÜ: system_res'in boş dönmesi engellendi, onay mesajları direkt kullanılıyor.
                 final_prompt = f"GÖREV: Kullanıcıya şu sistem bilgisini nazikçe ilet: {system_res}. SADECE yanıt metni. Kural: Eğer mesaj bir onay veya bilgi verme cümlesiyse, olduğu gibi kullan. Eğer bir hata içeriyorsa, nazikçe açıkla."
 
                 if system_res.startswith("YENİ_NO_OLUŞTU"):
@@ -528,10 +505,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
         elif data.get("type") == "chat":
             final_reply = data.get("reply")
-
-        # A2 Testi için kritik PENDING INTENT mantığı
         if not is_verified and not session_data.get('pending_intent'):
-            # Sadece kişisel işlem sorduysa niyeti kaydet
             is_personal_intent = data.get("type") == "action" and func in ["kimlik_dogrula", "sikayet_olustur",
                                                                            "kargo_sorgula", "tahmini_teslimat",
                                                                            "iade_islemi_baslat", "kargo_iptal_et",
