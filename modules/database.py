@@ -983,9 +983,10 @@ def kimlik_dogrulama_sorunu(): return "Kimlik doğrulama sorunları genellikle y
 
 def yurt_disi_kargo_kosul(): return "Yurt dışı gönderileri için fiyatlandırma ülkeye göre değişir. Süreler ve gümrük işlemleriyle ilgili detaylı bilgi ve gerekli belge listesi size SMS ile gönderilmiştir."
 
+
 def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
     if user_role != 'gonderici':
-        return "Güvenlik gereği alıcı bilgilerini (isim/telefon) sadece kargoyu gönderen kişi değiştirebilir."
+        return "Güvenlik gereği alıcı bilgilerini sadece kargoyu gönderen kişi değiştirebilir."
 
     if not no or not yeni_veri:
         return "İşlem için takip numarası ve yeni bilgi gereklidir."
@@ -994,8 +995,9 @@ def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
     cursor = conn.cursor()
 
     try:
+        # 2. MEVCUT SİPARİŞİ VE BAĞLI OLDUĞU ESKİ ALICIYI BUL
         query = """
-            SELECT s.alici_id, m.ad_soyad, m.telefon, k.takip_no 
+            SELECT s.siparis_no, k.takip_no, s.alici_id, m.ad_soyad, m.telefon 
             FROM siparisler s
             JOIN musteriler m ON s.alici_id = m.musteri_id
             LEFT JOIN kargo_takip k ON s.siparis_no = k.siparis_no
@@ -1006,39 +1008,48 @@ def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
         if not row:
             return "Sistemde bu numaraya ait bir kayıt bulunamadı."
 
-        alici_id = row['alici_id']
+        siparis_no = row['siparis_no']
+        takip_no = row['takip_no']
+        eski_id = row['alici_id']
         eski_ad = row['ad_soyad']
         eski_tel = row['telefon']
-        gercek_takip_no = row['takip_no']
+
+
+        yeni_ad = eski_ad
+        yeni_tel = eski_tel
 
         if bilgi_turu == "isim":
-            cursor.execute("UPDATE musteriler SET ad_soyad = ? WHERE musteri_id = ?", (yeni_veri, alici_id))
-            aciklama_log = f"Alıcı Adı Düzeltildi (Gönderici Talebi): {eski_ad} -> {yeni_veri}"
-            mesaj = f"Alıcı adı başarıyla '{yeni_veri}' olarak güncellendi."
+            yeni_ad = yeni_veri
+            degisiklik_mesaji = f"Alıcı Adı Değiştirildi: {eski_ad} -> {yeni_ad}"
 
         elif bilgi_turu == "telefon":
             temiz_tel = re.sub(r'[^0-9]', '', str(yeni_veri))
             if len(temiz_tel) > 10: temiz_tel = temiz_tel[-10:]
-
-            cursor.execute("UPDATE musteriler SET telefon = ? WHERE musteri_id = ?", (temiz_tel, alici_id))
-            aciklama_log = f"Alıcı Tel Düzeltildi (Gönderici Talebi): {eski_tel} -> {temiz_tel}"
-            mesaj = f"Alıcı telefon numarası güncellendi. Yeni numara: {temiz_tel}"
+            yeni_tel = temiz_tel
+            degisiklik_mesaji = f"Alıcı Telefonu Değiştirildi: {eski_tel} -> {yeni_tel}"
 
         else:
             return "Geçersiz işlem türü."
 
-        if gercek_takip_no:
+        cursor.execute("INSERT INTO musteriler (ad_soyad, telefon, email) VALUES (?, ?, ?)",
+                       (yeni_ad, yeni_tel, "bilinmiyor@kargo.com"))
+
+        yeni_musteri_id = cursor.lastrowid
+
+        cursor.execute("UPDATE siparisler SET alici_id = ? WHERE siparis_no = ?", (yeni_musteri_id, siparis_no))
+
+        if takip_no:
             log_query = """
                 INSERT INTO kargo_hareketleri (takip_no, islem_tarihi, islem_yeri, islem_tipi, aciklama, hedef_sube_id)
-                VALUES (?, datetime('now'), 'Çağrı Merkezi', 'Bilgi Güncelleme', ?, 0)
+                VALUES (?, datetime('now'), 'Çağrı Merkezi', 'Alıcı Değişikliği', ?, 0)
             """
-            cursor.execute(log_query, (gercek_takip_no, aciklama_log))
+            cursor.execute(log_query, (takip_no, degisiklik_mesaji))
 
         conn.commit()
-        return mesaj
+        return f"İşlem Başarılı. {degisiklik_mesaji}. Sipariş yeni alıcıya atandı."
 
     except Exception as e:
         print(f"Hata: {e}")
-        return "Sistemsel bir hata oluştu."
+        return f"Sistemsel bir hata oluştu: {e}"
     finally:
         conn.close()
