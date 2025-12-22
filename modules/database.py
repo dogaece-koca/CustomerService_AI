@@ -207,13 +207,37 @@ def gecikme_sikayeti(no, musteri_id):
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT tahmini_teslim FROM kargo_takip WHERE takip_no = ?", (no,))
+        cursor.execute("""
+            SELECT kt.tahmini_teslim, hc.durum_adi 
+            FROM kargo_takip kt
+            LEFT JOIN hareket_cesitleri hc ON kt.durum_id = hc.id
+            WHERE kt.takip_no = ?
+        """, (no,))
+
         sonuc = cursor.fetchone()
 
         if not sonuc:
             return "Hata: Belirttiğiniz numaraya ait bir kargo kaydı bulunamadı."
 
-        mevcut_tarih_str = sonuc[0]  # Örn: '2023-12-15'
+        mevcut_tarih_str = sonuc[0]
+        mevcut_durum = sonuc[1] if sonuc[1] else "Bilinmiyor"
+
+        if mevcut_durum and "TESLIM" in mevcut_durum.upper():
+
+            aciklama = f"Müşteri kargoyu almadığını beyan etti. Sistemde statü: {mevcut_durum}. Teslimat itirazı oluşturuldu."
+
+            cursor.execute("""
+                INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
+                VALUES (?, ?, ?, ?, datetime('now'), 'INCELEMEDE')
+            """, (musteri_id, no, 'Teslimat İtirazı', aciklama))
+
+            conn.commit()
+
+            return (
+                f"Sistemlerimde bu kargo '{mevcut_durum}' görünüyor. Ancak siz teslim almadığınızı belirttiğiniz için, "
+                f"şu an itibariyle 'Teslimat İtirazı' ve 'Kayıp Araştırma' sürecini başlattım. "
+                f"Şube ile görüşüp kargonun kime teslim edildiğini teyit ettireceğim.")
+
         mevcut_teslim_tarihi = datetime.strptime(mevcut_tarih_str, '%Y-%m-%d').date()
         bugun = datetime.now().date()
 
@@ -225,11 +249,12 @@ def gecikme_sikayeti(no, musteri_id):
             cursor.execute("""
                 UPDATE kargo_takip 
                 SET tahmini_teslim = ?,
-                    oncelik_puani = 2
+                    oncelik_puani = 2,
+                    durum_id = 3 
                 WHERE takip_no = ? OR siparis_no = ?
-            """, (yeni_tarih_str, no))
+            """, (yeni_tarih_str, no, no))
 
-            aciklama = f"{no} nolu kargo gecikti (Eski tarih: {mevcut_tarih_str}). Teslimat {yeni_tarih_str} tarihine ötelendi."
+            aciklama = f"{no} nolu kargo gecikti. Teslimat {yeni_tarih_str} tarihine ötelendi."
 
             cursor.execute("""
                             INSERT INTO sikayetler (olusturan_musteri_id, takip_no, tip, aciklama, tarih, durum) 
@@ -239,18 +264,18 @@ def gecikme_sikayeti(no, musteri_id):
             conn.commit()
 
             return (
-                f"Kontrollerimi sağladım ve haklısınız, kargonuzun {mevcut_tarih_str} tarihinde teslim edilmesi gerekiyordu. "
-                f"Yaşanan aksaklık için çok özür dilerim. Şikayet kaydınızı oluşturdum. "
-                f"Kargonuzu 'Yüksek Öncelikli' listeye aldım ve teslimat tarihini {yeni_tarih_str} (yarın) olarak güncelledim.")
+                f"Kontrollerimi sağladım, kargonuz yolda (Dağıtımda) ancak {mevcut_tarih_str} tarihinde gecikme yaşanmış. "
+                f"Şikayet kaydınızı oluşturdum. "
+                f"Kargonuzu tekrar öncelikli dağıtım listesine aldım ve teslimat tarihini {yeni_tarih_str} (yarın) olarak güncelledim.")
 
         else:
             return (f"Sistemdeki kontrollerimi yaptım; şu an için bir gecikme görünmüyor. "
-                    f"Tahmini teslimat tarihiniz {mevcut_tarih_str} olarak gözüküyor. "
-                    f"Kargonuzun zamanında ulaşması için elimizden geleni yapıyoruz.")
+                    f"Kargonuzun durumu: {mevcut_durum}. "
+                    f"Tahmini teslimat tarihiniz {mevcut_tarih_str} olarak gözüküyor.")
 
     except Exception as e:
         print(f"Veritabanı Hata: {e}")
-        return "İşlem sırasında teknik bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+        return "İşlem sırasında teknik bir hata oluştu."
     finally:
         conn.close()
 

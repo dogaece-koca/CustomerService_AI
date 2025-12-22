@@ -168,6 +168,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
        - YANLIŞ: "Özür dileriz, şikayet oluşturdum, kargonuz 2 gün içinde gelir." (Veri uydurma!)
        - DOĞRU: "Yaşanan aksaklık için çok özür dilerim, şikayet kaydınızı oluşturdum. Sistemlerimize göre kargonuz BUGÜN teslim edilecek görünüyor, süreci hızlandırmaları için şubeyi uyarıyorum."
 
+    !!! AYRIŞTIRMA VE DÜZELTME KURALLARI (ÇOK ÖNEMLİ) !!!
+    1. PARAMETRE AYRIŞTIRMA: Kullanıcı "Numaram 12345 telefonum 555666" gibi iki sayıyı aynı anda söylerse, bunları ASLA birleştirme. 
+       - YANLIŞ: "no": "12345555666"
+       - DOĞRU: "no": "12345", "telefon": "555666"
+       
     ANALİZ KURALLARI VE ÖNCELİKLERİ:
 
     --- SENARYO 1: GENEL SORGULAR (MİSAFİR DE YAPABİLİR) ---
@@ -222,8 +227,13 @@ def process_with_gemini(session_id, user_message, user_sessions):
     - Ad, numara ve telefonu bir anda SORMA. SIRAYLA sor.
     - Ad, Numara ve Telefonun hepsi tamamsa -> 'kimlik_dogrula' çağır.
     - Sadece eksik olanı iste. 
-    - Hata varsa eşleşmeyen veriyi belirt, örneğin kargo takip numarası hatalıysa müşteriye söylediği numaranın sistemdeki numarayla eşleşmediğini söyle ve yeniden numara belirtmesini iste.
-    - Ad, Numara ve Telefon elimizdeyse -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "...", "no": "...", "telefon": "..." }} }}
+    
+    - HATA DURUMUNDA DAVRANIŞ:
+      - Eğer kullanıcı "Numaramı yanlış söyledim, doğrusu 12345" derse:
+        -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "{session_data.get('user_name') or '...'}", "no": "12345", "telefon": "{session_data.get('phone') or '...'}" }} }}
+      (Yani sadece değişeni güncelle, diğerlerini koru).
+      - Hata varsa eşleşmeyen veriyi belirt, örneğin kargo takip numarası hatalıysa müşteriye söylediği numaranın sistemdeki numarayla eşleşmediğini söyle ve yeniden numara belirtmesini iste.
+      - Ad, Numara ve Telefon elimizdeyse -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "...", "no": "...", "telefon": "..." }} }}
 
     --- SENARYO 2: KULLANICI DOĞRULANMIŞ İSE (GİRİŞ YAPILDI) ---
     Eğer 'DURUM: KULLANICI DOĞRULANDI' ise:
@@ -235,6 +245,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
     # "Yanlış adrese gitti", "Kargom başka yere teslim edildi", "Ben oraya yollamadım" (YANLIŞ TESLİMAT):
       -> {{ "type": "action", "function": "yanlis_teslimat_bildirimi", "parameters": {{ "no": "{saved_no}", "dogru_adres": "..." }} }}
       (Eğer doğru adres belirtilmediyse "dogru_adres" boş bırakılsın).
+      (KRİTİK KURAL: Kullanıcı sadece "Gelmedi", "Almadım", "Yok" diyorsa bunu seçme. Mutlaka "Adres yanlış", "Yanlış yere gitti", "Eski adresim" gibi YER/ADRES hatası belirten bir ifade olmalı.)
 
     # İADE TALEBİ (DB KAYDI İÇİN SEBEP ZORUNLU)
     - "İade etmek istiyorum", "Geri göndereceğim":
@@ -306,7 +317,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
     # GECİKEN / HAREKETSİZ KARGO
     - "Kargom günlerdir aynı yerde", "Neden ilerlemiyor?", "Transferde takıldı":
-      -> {{ "type": "action", "function": "kargo_durum_destek", "parameters": {{ "takip_no": "{saved_no}", "musteri_id": "{user_id}" }} }}
+      - "Kargom gecikti", "teslimat süresi aşıldı", "çok yordu" -> {{ "type": "action", "function": "gecikme_sikayeti", "parameters": {{ "no": "{saved_no}", "musteri_id": "{user_id}" }} }}
 
     # FATURA İTİRAZI
     - "Faturam çok uçuk", "İtiraz ediyorum", "çok yüksek", "Faturam yanlış" (Agresif ifadeler dahil):
@@ -577,25 +588,18 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
         elif data.get("type") == "chat":
             final_reply = data.get("reply")
-            # --- GEMINI_AI.PY EN ALT KISIM (GÜNCELLENMİŞ HALİ) ---
 
-            # Eğer kullanıcı doğrulanmamışsa, Niyeti Kaydet (Ama dikkatli ol!)
         if not is_verified:
-            # 1. Kontrol: Mesaj sayı içeriyor mu? (Telefon veya Takip No ise niyeti ezme)
+
             is_numeric_data = bool(re.search(r'\d{3,}', user_message))
 
-            # 2. Kontrol: Mesaj çok kısa mı ve zaten bekleyen bir niyetimiz var mı?
-            # (Örn: "Ahmet Yılmaz" gibi isimler niyeti ezmemeli, ama "İptal et" gibi kısa emirler ezmeli)
             current_pending = session_data.get('pending_intent')
             is_short_text = len(user_message.split()) <= 3
 
-            # Kısa emir kelimeleri (Bunlar kısadır ama niyet değiştirir, izin ver)
             action_keywords = ["iade", "iptal", "nerede", "durum", "şikayet", "değiştir", "adres", "yanlış",
                                    "teslim"]
             is_command = any(kw in user_message.lower() for kw in action_keywords)
 
-            # KARAR MEKANİZMASI:
-            # Eğer bu bir sayısal veri değilse VE (kısa cevap değilse VEYA bir komutsa VEYA hafıza boşsa)
             should_update_intent = not is_numeric_data and (not is_short_text or is_command or not current_pending)
 
             if should_update_intent and (
