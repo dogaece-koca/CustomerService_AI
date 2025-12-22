@@ -97,15 +97,13 @@ def ucret_hesapla(cikis, varis, desi):
         return "Fiyat hesaplayabilmem için 'Nereden', 'Nereye' ve 'Desi' bilgisini söylemelisiniz."
 
     try:
-        # Desi bilgisini sayıya çevir
         desi = float(str(desi).replace("desi", "").strip())
     except:
         return "Lütfen desi bilgisini sayısal olarak belirtin."
 
-    mesafe_km = mesafe_hesapla_ai(cikis, varis)  # AI'dan 450 gelmesi bekleniyor
+    mesafe_km = mesafe_hesapla_ai(cikis, varis)
 
     if mesafe_km == 0:
-        # AI'dan mesafe gelmezse hata döndür
         return f"Üzgünüm, {cikis} ile {varis} arasındaki mesafeyi hesaplayamadım."
 
     conn = get_db_connection()
@@ -114,36 +112,27 @@ def ucret_hesapla(cikis, varis, desi):
 
         if not tarife: return "Veritabanında tarife bilgisi bulunamadı."
 
-        # Tarife Değerleri:
-        # kisa_mesafe_km_ucret (35), taban_desi_ucreti (100), taban_desi_limiti (5)
-        # mesafe_siniri_km (200)
-
         sinir_km = tarife['mesafe_siniri_km']
 
         if mesafe_km > sinir_km:
-            km_birim_ucret = tarife['uzak_mesafe_km_ucret']  # 50
-            ek_desi_ucret = tarife['uzak_mesafe_ek_desi_ucret']  # 30
+            km_birim_ucret = tarife['uzak_mesafe_km_ucret']
+            ek_desi_ucret = tarife['uzak_mesafe_ek_desi_ucret']
         else:
-            km_birim_ucret = tarife['kisa_mesafe_km_ucret']  # 35
-            ek_desi_ucret = tarife['kisa_mesafe_ek_desi_ucret']  # 20
+            km_birim_ucret = tarife['kisa_mesafe_km_ucret']
+            ek_desi_ucret = tarife['kisa_mesafe_ek_desi_ucret']
 
-        # D1 Testi (450km > 200km olduğu için Uzak Mesafe tarifesi (km_ucreti=50) uygulanacak)
-        yol_ucreti = mesafe_km * km_birim_ucret  # 450 * 50 = 22500
+        yol_ucreti = mesafe_km * km_birim_ucret
 
-        taban_limit = tarife['taban_desi_limiti']  # 5
-        taban_fiyat = tarife['taban_desi_ucreti']  # 100
+        taban_limit = tarife['taban_desi_limiti']
+        taban_fiyat = tarife['taban_desi_ucreti']
 
-        if desi <= taban_limit:  # Gelen desi 4 olduğu için bu koşul sağlanır
-            paket_ucreti = taban_fiyat  # 100
+        if desi <= taban_limit:
+            paket_ucreti = taban_fiyat
         else:
             fark_desi = desi - taban_limit
-            # Ek desi maliyeti eklenir. (4 > 5 olmadığı için bu blok çalışmaz)
             paket_ucreti = taban_fiyat + (fark_desi * ek_desi_ucret)
 
-        toplam_fiyat = yol_ucreti + paket_ucreti  # 22500 + 100 = 22600.00 TL (D1'deki 450*35+100 beklentisini değiştiririz, çünkü veritabanı değerlerini kullanıyoruz)
-
-        # NOT: D1 beklentisi (450 * 35 + 100) hatalıdır. 450 km uzak mesafe tarifesine girer.
-        # Biz burada gerçek DB kurallarına göre hesaplıyoruz (450 km > 200 km).
+        toplam_fiyat = yol_ucreti + paket_ucreti
 
         return float(toplam_fiyat)
 
@@ -550,11 +539,10 @@ def yanlis_teslimat_bildirimi(no, dogru_adres, musteri_id):
 
 def sube_sorgula(lokasyon):
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row  # Sütun isimleriyle erişmek için
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     try:
-        # --- SENARYO 1: KULLANICI SPESİFİK BİR YER SÖYLEDİ (Örn: "İzmir şubesi") ---
         if lokasyon and "genel" not in lokasyon.lower() and "nerede" not in lokasyon.lower():
             lokasyon_temiz = f"%{lokasyon}%"
             query = "SELECT sube_adi, il, ilce, adres, telefon FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?"
@@ -983,7 +971,6 @@ def kimlik_dogrulama_sorunu(): return "Kimlik doğrulama sorunları genellikle y
 
 def yurt_disi_kargo_kosul(): return "Yurt dışı gönderileri için fiyatlandırma ülkeye göre değişir. Süreler ve gümrük işlemleriyle ilgili detaylı bilgi ve gerekli belge listesi size SMS ile gönderilmiştir."
 
-
 def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
     if user_role != 'gonderici':
         return "Güvenlik gereği alıcı bilgilerini sadece kargoyu gönderen kişi değiştirebilir."
@@ -995,7 +982,6 @@ def alici_bilgisi_guncelle(no, yeni_veri, user_role, bilgi_turu="isim"):
     cursor = conn.cursor()
 
     try:
-        # 2. MEVCUT SİPARİŞİ VE BAĞLI OLDUĞU ESKİ ALICIYI BUL
         query = """
             SELECT s.siparis_no, k.takip_no, s.alici_id, m.ad_soyad, m.telefon 
             FROM siparisler s

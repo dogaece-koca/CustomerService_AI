@@ -197,8 +197,16 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
     # NORMAL ŞUBE SORGULARI ("EN YAKIN" YOKSA):
     - "Şubeniz nerede?", "Kadıköy şubesi adresi" -> {{ "type": "action", "function": "sube_sorgula", "parameters": {{ "lokasyon": "..." }} }}
-    - "Kaça kadar açıksınız?", "Pazar açık mı?" -> {{ "type": "action", "function": "sube_saat_sorgula", "parameters": {{ "lokasyon": "..." }} }}
-    - "Telefon numaranız ne?" -> {{ "type": "action", "function": "sube_telefon_sorgula", "parameters": {{ "lokasyon": "..." }} }}
+
+    # SAAT SORGUSU (GÜNCELLENEN KISIM)
+    - "Kaça kadar açıksınız?", "Pazar açık mı?", "Orası saat kaçta kapanıyor?", "Bu şube kaça kadar hizmet veriyor?":
+      -> {{ "type": "action", "function": "sube_saat_sorgula", "parameters": {{ "lokasyon": "..." }} }}
+      (KRİTİK KURAL: Eğer kullanıcı "orası", "bu şube", "o şube" gibi zamirler kullanırsa veya hiç yer belirtmezse ("Kaça kadar açık?" gibi), GEÇMİŞ SOHBETTE (özellikle asistanın son cevabında) geçen EN SON şube ismini (Örn: Beşiktaş) al ve 'lokasyon' parametresine yaz.)
+
+    # TELEFON SORGUSU
+    - "Telefon numaranız ne?", "Oranın numarası kaç?", "Peki bu şubenin telefonu ne?":
+      -> {{ "type": "action", "function": "sube_telefon_sorgula", "parameters": {{ "lokasyon": "..." }} }}
+      (KRİTİK KURAL: Eğer kullanıcı "bu şube", "oranın", "orası" gibi zamirler kullanırsa, GEÇMİŞ SOHBETTE geçen EN SON şube ismini al ve 'lokasyon' parametresine yaz.)
 
     # SÜPERVİZÖR / CANLI DESTEK (ÖZEL İSTİSNA - SADECE AD VE TELEFON YETERLİ)
     - "Yetkiliyle görüşmek istiyorum", "Süpervizör", "İnsana bağla", "Müşteri temsilcisi":
@@ -397,6 +405,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     system_res = f"Doğrulama Hatası: {hata_detayi}"
 
             elif func == "ucret_hesapla":
+                session_data['pending_intent'] = None
                 raw_result = ucret_hesapla(params.get("cikis"), params.get("varis"), params.get("desi"))
 
                 if isinstance(raw_result, (int, float)):
@@ -405,6 +414,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     system_res = raw_result
 
             elif func == "kampanya_sorgula":
+                session_data['pending_intent'] = None
                 res = kampanya_sorgula()
 
                 ozel_prompt = f"""
@@ -430,6 +440,7 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     print(f"Kampanya AI Hatası: {e}")
                     final_reply = f"Şu anda aktif kampanyalarımız şunlardır: {res}"
             elif func == "vergi_hesapla_ai":
+                session_data['pending_intent'] = None
                 system_res = vergi_hesapla_ai(
                     params.get("urun_kategorisi"),
                     params.get("fiyat"),
@@ -437,8 +448,10 @@ def process_with_gemini(session_id, user_message, user_sessions):
                 )
                 final_reply = system_res
             elif func == "kargo_ucret_itiraz":
+                session_data['pending_intent'] = None
                 system_res = kargo_ucret_itiraz(saved_no, params.get("fatura_no"), user_id)
             elif func == "yanlis_teslimat_bildirimi":
+                session_data['pending_intent'] = None
                 gelen_adres = params.get("dogru_adres")
                 if not gelen_adres:
                     final_reply = "Anladım, teslimat adresinde bir karışıklık olmuş. Kargonuzun yönlendirilmesini istediğiniz doğru ve açık adresi söyler misiniz?"
@@ -447,40 +460,57 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     system_res = yanlis_teslimat_bildirimi(aktif_no, gelen_adres, user_id)
                     final_reply = system_res
             elif func == "sube_saat_sorgula":
+                session_data['pending_intent'] = None
                 system_res = sube_saat_sorgula(params.get("lokasyon"))
             elif func == "sube_sorgula":
+                session_data['pending_intent'] = None
                 system_res = sube_sorgula(params.get("lokasyon"))
             elif func == "en_yakin_sube_bul":
+                session_data['pending_intent'] = None
                 bilgi_turu = params.get("bilgi_turu", "adres")
                 system_res = en_yakin_sube_bul(params.get("kullanici_adresi"), bilgi_turu)
             elif func == "sube_telefon_sorgula":
+                session_data['pending_intent'] = None
                 system_res = sube_telefon_sorgula(params.get("lokasyon"))
             elif func == "sikayet_olustur":
+                session_data['pending_intent'] = None
                 system_res = sikayet_olustur(params.get("no"), params.get("konu"), user_id)
             elif func == "hasar_kaydi_olustur":
+                session_data['pending_intent'] = None
                 system_res = hasar_kaydi_olustur(params.get("no"), params.get("hasar_tipi"), user_id)
             elif func == "kargo_sorgula":
+                session_data['pending_intent'] = None
                 aktif_rol = session_data.get('role')
                 system_res = kargo_bilgisi_getir(params.get("no"), user_role=aktif_rol)
             elif func == "tahmini_teslimat":
+                session_data['pending_intent'] = None
                 system_res = tahmini_teslimat_saati_getir(params.get("no"))
             elif func == "iade_islemi_baslat":
+                session_data['pending_intent'] = None
                 system_res = iade_islemi_baslat(params.get("no"), params.get("sebep"), user_id, user_role)
             elif func == "kargo_iptal_et":
+                session_data['pending_intent'] = None
                 system_res = kargo_iptal_et(params.get("no"))
             elif func == "adres_degistir":
+                session_data['pending_intent'] = None
                 system_res = adres_degistir(params.get("no"), params.get("yeni_adres"))
             elif func == "alici_adresi_degistir":
+                session_data['pending_intent'] = None
                 system_res = alici_adresi_degistir(params.get("no"), params.get("yeni_adres"))
             elif func == "kargo_durum_destek":
+                session_data['pending_intent'] = None
                 system_res = kargo_durum_destek(saved_no, user_id)
             elif func == "fatura_bilgisi_gonderici":
+                session_data['pending_intent'] = None
                 system_res = fatura_bilgisi_gonderici(params.get("no"), user_id)
             elif func == "evde_olmama_bildirimi":
+                session_data['pending_intent'] = None
                 system_res = evde_olmama_bildirimi(params.get("no"))
             elif func == "supervizor_talebi":
+                session_data['pending_intent'] = None
                 system_res = supervizor_talebi(params.get("ad"), params.get("telefon"))
             elif func == "alici_bilgisi_guncelle":
+                session_data['pending_intent'] = None
                 aktif_rol = session_data.get('role')
                 aktif_no = session_data.get('tracking_no') or params.get("no")
                 system_res = alici_bilgisi_guncelle(
@@ -490,22 +520,30 @@ def process_with_gemini(session_id, user_message, user_sessions):
                     params.get("bilgi_turu")
                 )
             elif func == "gecikme_sikayeti":
+                session_data['pending_intent'] = None
                 system_res = gecikme_sikayeti(params.get("no"), user_id)
             elif func == "takip_numarasi_hatasi":
+                session_data['pending_intent'] = None
                 system_res = takip_numarasi_hatasi(user_id)
             elif func == "kurye_gelmedi_sikayeti":
+                session_data['pending_intent'] = None
                 aktif_no = session_data.get('tracking_no') or params.get("takip_no")
                 system_res = kurye_gelmedi_sikayeti(aktif_no, user_id)
                 final_reply = system_res
             elif func == "hizli_teslimat_ovgu":
+                session_data['pending_intent'] = None
                 system_res = hizli_teslimat_ovgu()
             elif func == "kimlik_dogrulama_sorunu":
+                session_data['pending_intent'] = None
                 system_res = kimlik_dogrulama_sorunu()
             elif func == "yurt_disi_kargo_kosul":
+                session_data['pending_intent'] = None
                 system_res = yurt_disi_kargo_kosul()
             elif func == "bildirim_ayari_degistir":
+                session_data['pending_intent'] = None
                 system_res = bildirim_ayari_degistir(params.get("tip"), user_id)
             elif func == "teslimat_suresi_hesapla_ai":
+                session_data['pending_intent'] = None
                 cikis = params.get("cikis")
                 varis = params.get("varis")
                 desi = params.get("desi", 5)
@@ -539,18 +577,33 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
         elif data.get("type") == "chat":
             final_reply = data.get("reply")
-        if not is_verified and not session_data.get('pending_intent'):
-            is_personal_intent = data.get("type") == "action" and func in ["kimlik_dogrula", "sikayet_olustur",
-                                                                           "kargo_sorgula", "tahmini_teslimat",
-                                                                           "iade_islemi_baslat", "kargo_iptal_et",
-                                                                           "adres_degistir",
-                                                                           "yanlis_teslimat_bildirimi"]
+            # --- GEMINI_AI.PY EN ALT KISIM (GÜNCELLENMİŞ HALİ) ---
 
-            if is_personal_intent or (user_message.lower().strip() not in ["merhaba", "slm", "selam", "nasılsın"]):
+            # Eğer kullanıcı doğrulanmamışsa, Niyeti Kaydet (Ama dikkatli ol!)
+        if not is_verified:
+            # 1. Kontrol: Mesaj sayı içeriyor mu? (Telefon veya Takip No ise niyeti ezme)
+            is_numeric_data = bool(re.search(r'\d{3,}', user_message))
+
+            # 2. Kontrol: Mesaj çok kısa mı ve zaten bekleyen bir niyetimiz var mı?
+            # (Örn: "Ahmet Yılmaz" gibi isimler niyeti ezmemeli, ama "İptal et" gibi kısa emirler ezmeli)
+            current_pending = session_data.get('pending_intent')
+            is_short_text = len(user_message.split()) <= 3
+
+            # Kısa emir kelimeleri (Bunlar kısadır ama niyet değiştirir, izin ver)
+            action_keywords = ["iade", "iptal", "nerede", "durum", "şikayet", "değiştir", "adres", "yanlış",
+                                   "teslim"]
+            is_command = any(kw in user_message.lower() for kw in action_keywords)
+
+            # KARAR MEKANİZMASI:
+            # Eğer bu bir sayısal veri değilse VE (kısa cevap değilse VEYA bir komutsa VEYA hafıza boşsa)
+            should_update_intent = not is_numeric_data and (not is_short_text or is_command or not current_pending)
+
+            if should_update_intent and (
+                    user_message.lower().strip() not in ["merhaba", "slm", "selam", "nasılsın"]):
                 session_data['pending_intent'] = user_message
-                print(f"[DEBUG] YENİ NİYET KAYDEDİLDİ (Parçalı Giriş için): '{user_message}'")
+                print(f"[DEBUG] YENİ NİYET GÜNCELLENDİ: '{user_message}'")
             else:
-                print(f"[DEBUG] NİYET KAYDEDİLMEDİ (Genel Sorgu)")
+                print(f"[DEBUG] NİYET KORUNDU (Veri Girişi Algılandı): '{current_pending}'")
 
         session_data['history'].append(f"KULLANICI: {user_message}")
         session_data['history'].append(f"ASİSTAN: {final_reply}")
