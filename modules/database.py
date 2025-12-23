@@ -296,7 +296,10 @@ def kargo_bilgisi_getir(no, user_role=None):
 
         # --- GÖNDERİCİYE ÖZEL MESAJLAR ---
         if user_role == 'gonderici':
-            if durum_adi == 'DAGITIMDA':
+            if durum_adi == 'IPTAL EDILDI' or 'IPTAL' in durum_adi.upper():
+                return f"Gönderinizin durumu: {durum_adi}. İptal işlemi nedeniyle teslimat yapılmayacaktır."
+
+            elif durum_adi == 'DAGITIMDA':
                 return (f"Gönderdiğiniz kargo şu an dağıtımda. "
                         f"Bugün gün içerisinde alıcıya teslim edilmesi planlanıyor.")
 
@@ -316,7 +319,10 @@ def kargo_bilgisi_getir(no, user_role=None):
 
         # --- ALICI (VEYA MİSAFİR) İÇİN MESAJLAR ---
         else:
-            if durum_adi == 'DAGITIMDA':
+            if durum_adi == 'IPTAL EDILDI' or 'IPTAL' in durum_adi.upper():
+                return "Bu kargo iptal edilmiştir. Teslimat yapılmayacaktır."
+
+            elif durum_adi == 'DAGITIMDA':
                 return (f"Harika haber! {no} numaralı kargonuz şu anda dağıtım ekibimizle yola çıktı. "
                         f"Tahmini olarak bugün {teslim_adresi} adresine teslim edilecektir. Lütfen telefonunuzun yakınınızda olduğundan emin olun.")
 
@@ -331,9 +337,6 @@ def kargo_bilgisi_getir(no, user_role=None):
             elif durum_adi == 'HAZIRLANIYOR':
                 return (f"Kargonuzun gönderi hazırlıkları devam ediyor. "
                         f"En kısa sürede kurye tarafından alınacak ve dağıtım ağına katılacaktır.")
-
-            elif durum_adi == 'IPTAL EDILDI':
-                return "Bu kargo iptal edilmiştir."
 
             else:
                 return f"Kargo Durumu: {durum_adi}. Detaylı bilgi: {tahmini_teslim} tarihinde teslim edilmesi bekleniyor."
@@ -980,7 +983,7 @@ def kurye_gelmedi_sikayeti(no, musteri_id):
         conn.commit()
 
         return (f"Yaşattığımız bu aksaklık için kurumum adına çok özür dilerim. "
-                f"Şikayet kaydınızı 'ACİL' koduyla operasyon müdürüne ilettim. "
+                f"Şikayet kaydınızı 'Acil' koduyla operasyon müdürüne ilettim. "
                 f"{no} numaralı işleminizi yarına ({yarin}) erteledim ve 'Öncelikli Dağıtım/Alım' listesine ekledim. "
                 f"Yarın gün içerisinde mutlaka adresinize gelinecektir.")
 
