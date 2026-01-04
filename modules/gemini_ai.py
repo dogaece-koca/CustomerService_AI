@@ -2,9 +2,9 @@ from modules.database import kimlik_dogrula, ucret_hesapla, kampanya_sorgula, ka
     yanlis_teslimat_bildirimi, sube_saat_sorgula, sube_sorgula, en_yakin_sube_bul, sube_telefon_sorgula, \
     sikayet_olustur, hasar_kaydi_olustur, kargo_bilgisi_getir, tahmini_teslimat_saati_getir, iade_islemi_baslat, \
     kargo_iptal_et, adres_degistir, alici_adresi_degistir, kargo_durum_destek, fatura_bilgisi_gonderici, \
-    evde_olmama_bildirimi, supervizor_talebi, bildirim_ayari_degistir, takip_numarasi_hatasi, gecikme_sikayeti, \
+    evde_olmama_bildirimi, supervizor_talebi, bildirim_ayari_degistir,  gecikme_sikayeti, \
     kurye_gelmedi_sikayeti, hizli_teslimat_ovgu, kimlik_dogrulama_sorunu, yurt_disi_kargo_kosul, \
-    alici_bilgisi_guncelle
+    alici_bilgisi_guncelle, isimle_kargo_bul
 from modules.ml_modulu import duygu_analizi_yap, teslimat_suresi_hesapla
 from dotenv import load_dotenv
 from datetime import datetime
@@ -158,6 +158,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
     ÖN İŞLEM: Tek tek söylenen sayıları birleştir (bir iki üç -> 123).
     ÇIKTI: SADECE JSON.
+    
+    # --- EN ÖNEMLİ KURAL (HALÜSİNASYON ENGELLEME) ---
+    1. KULLANICININ SÖYLEMEDİĞİ HİÇBİR VERİYİ PARAMETRE OLARAK EKLEME.
+    2. ASLA "KARGO_TAKIP_NUMARASI_BULUNDU", "BİLİNMİYOR", "NULL" GİBİ DEĞERLER UYDURMA.
+    3. EĞER BİR FONKSİYON İÇİN GEREKLİ PARAMETRE (ÖZELLİKLE 'no') YOKSA, O FONKSİYONU ÇAĞIRAMAZSIN. BAŞKA FONKSİYON SEÇ.
 
     !!! KESİN VE DEĞİŞMEZ KURAL !!!
     - CEVAPLARDA ASLA EMOJİ KULLANMA (Örn: 😊, 👋, 📦 YASAK). 
@@ -173,6 +178,44 @@ def process_with_gemini(session_id, user_message, user_sessions):
        - YANLIŞ: "no": "12345555666"
        - DOĞRU: "no": "12345", "telefon": "555666"
        
+    # --- KRİTİK KARAR MEKANİZMASI (ROUTING LOGIC) ---
+    Kullanıcı adını veya telefonunu verdiğinde, hemen fonksiyon çağırma. ÖNCE SOHBET GEÇMİŞİNE BAK.
+    
+    1. TAKİP NUMARASI SORUNU (Numara Hatalı / Yok / Unuttum)
+       - Kullanıcı: "Numaram hatalı", "Sistem kabul etmiyor", "Takip no bilmiyorum" derse...
+       - ASİSTANIN AMACI: Doğrudan 'isimle_kargo_bul' fonksiyonunu çalıştırmaktır.
+       - AKSİYON: Fonksiyon için gerekli parametreler (Ad ve Telefon) eksik olduğu için kullanıcıya bunları sor.
+       
+       *Adım 1:* {{ "type": "chat", "reply": "Anladım, numaranızla ilgili sorun varsa isminizle sorgulama yapalım. Adınız ve Soyadınız nedir?" }}
+       *Adım 2 (İsim gelince):* {{ "type": "chat", "reply": "Teşekkürler [İSİM]. Güvenliğiniz için telefon numaranızı da söyler misiniz?" }}
+       *Adım 3 (Telefon gelince):* {{ "type": "action", "function": "isimle_kargo_bul", "parameters": {{ "ad_soyad": "...", "telefon": "..." }} }}
+       
+        Kullanıcı bilgileri parça parça verirse hafızanı kullan.
+    
+        SENARYO: 
+        1. Kullanıcı önce "Adım Can" dedi. (Sen telefon istedin).
+        2. Kullanıcı şimdi "535 123 44 55" dedi.
+    
+        YANLIŞ DAVRANIŞ: "Adınız ne?" diye tekrar sormak.
+        DOĞRU DAVRANIŞ: Geçmişteki "Can" ismini al + şimdiki "535..." numarasını al -> 'isimle_kargo_bul' çağır.
+       
+    2. NORMAL KİMLİK DOĞRULAMA (ELİNDE NUMARA VAR)
+       KURAL: Bilgileri KESİNLİKLE şu sırayla iste: AD SOYAD -> TAKİP NO -> TELEFON.
+       (Kullanıcının verdiği parçaları hafızanda tut ve eksik olanı bu sıraya göre sor).
+
+       A. ADIM 1 (Ad Eksik): Kullanıcı kimlik doğrulama gerektiren bir işlem yapmak istedi ama ismi yok.
+          -> {{ "type": "chat", "reply": "Size yardımcı olabilmem için önce adınızı ve soyadınızı öğrenebilir miyim?" }}
+       
+       B. ADIM 2 (Takip No Eksik): Adı biliyorsun ama Takip No yok.
+          -> {{ "type": "chat", "reply": "Teşekkürler [İSİM]. Şimdi kargo takip numaranızı söyler misiniz?" }}
+          
+       C. ADIM 3 (Telefon Eksik): Ad ve Takip No var, Telefon yok.
+          -> {{ "type": "chat", "reply": "Güvenliğiniz için son olarak telefon numaranızı rica edebilir miyim?" }}
+          
+       D. FİNAL (Hepsi Tamam): Ad + Takip No + Telefon var.
+          -> {{ "type": "action", "function": "kimlik_dogrula", "parameters": {{ "ad": "...", "no": "...", "telefon": "..." }} }}
+       
+       
     ANALİZ KURALLARI VE ÖNCELİKLERİ:
 
     --- SENARYO 1: GENEL SORGULAR (MİSAFİR DE YAPABİLİR) ---
@@ -182,6 +225,11 @@ def process_with_gemini(session_id, user_message, user_sessions):
     # KAMPANYA SORGULAMA (YÜKSEK ÖNCELİK VE GÜÇLÜ KURAL)
     - "Öğrenci indirimi var mı?", "Kampanyalarınız neler?", "Bana özel plan var mı?", "İndirim", "kampanya", "fırsat", "özel teklif", "öğrenci", "plan" kelimelerinden HERHANGİ BİRİ GEÇİYORSA VEYA SORULUYORSA İLK ÖNCE BU KURALI ÇALIŞTIR.
       -> {{ "type": "action", "function": "kampanya_sorgula", "parameters": {{}} }}
+      
+   # İSİMLE KARGO BULMA 
+   - Kullanıcı **"takip numarası hatalı", "geçersiz numara", "kod yanlış", "sistem görmüyor"**, **"numaram yok"** veya **"numara bulunamadı"** gibi sorunlardan bahsediyorsa:
+      -> {{ "type": "action", "function": "takip_numarasi_hatasi", "parameters": {{}} }}
+      (KURAL: Eğer kullanıcı sadece adını söylerse (Örn: "Adım Can"), telefon numarasını da iste. Fonksiyonu eksik parametreyle çağırma.)
 
     # FİYAT SORGULAMA 
     - "İstanbul'dan Ankara'ya kargo ne kadar?", "Fiyat hesapla"
@@ -533,9 +581,27 @@ def process_with_gemini(session_id, user_message, user_sessions):
             elif func == "gecikme_sikayeti":
                 session_data['pending_intent'] = None
                 system_res = gecikme_sikayeti(params.get("no"), user_id)
-            elif func == "takip_numarasi_hatasi":
-                session_data['pending_intent'] = None
-                system_res = takip_numarasi_hatasi(user_id)
+            elif func == "isimle_kargo_bul":
+                ad = params.get("ad_soyad")
+                tel = params.get("telefon")
+                db_sonuc = isimle_kargo_bul(ad, tel)
+
+                if db_sonuc.startswith("BASARILI"):
+                    parts = db_sonuc.split("|")
+                    user_sessions[session_id]['verified'] = True
+                    user_sessions[session_id]['tracking_no'] = parts[1]
+                    user_sessions[session_id]['user_name'] = parts[2]
+                    user_sessions[session_id]['role'] = parts[3]
+                    user_sessions[session_id]['user_id'] = parts[4]
+                    user_sessions[session_id] = session_data
+
+                    system_res = f"Teşekkürler {parts[2]}. Girişiniz yapıldı. {parts[1]} numaralı kargonuz için ne işlem yapmak istersiniz?"
+                else:
+                    hata_msg = db_sonuc.split("|")[1] if "|" in db_sonuc else db_sonuc
+                    system_res = f"Giriş Yapılamadı: {hata_msg}. Lütfen bilgilerinizi kontrol edin."
+
+                final_prompt = f"GÖREV: Kullanıcıya şu durumu bildir: {system_res}."
+                final_reply = model.generate_content(final_prompt).text.strip()
             elif func == "kurye_gelmedi_sikayeti":
                 session_data['pending_intent'] = None
                 aktif_no = session_data.get('tracking_no') or params.get("takip_no")
@@ -577,12 +643,6 @@ def process_with_gemini(session_id, user_message, user_sessions):
 
             if func != "kimlik_dogrula" and func != "kampanya_sorgula" and func != "vergi_hesapla_ai" and func != "yanlis_teslimat_bildirimi":
                 final_prompt = f"GÖREV: Kullanıcıya şu sistem bilgisini nazikçe ilet: {system_res}. SADECE yanıt metni. Kural: Eğer mesaj bir onay veya bilgi verme cümlesiyse, olduğu gibi kullan. Eğer bir hata içeriyorsa, nazikçe açıkla."
-
-                if system_res.startswith("YENİ_NO_OLUŞTU"):
-                    yeni_no = system_res.split("|")[1]
-                    final_prompt = (f"GÖREV: Hata tespiti sonrası yeni kargo numarası oluşturuldu. "
-                                    f"Müşteriye eski numarasının hatalı olduğunu, sorunu çözmek için otomatik olarak **{yeni_no}** numaralı yeni bir kargo oluşturulduğunu söyle. "
-                                    f"Müşteriden yeni numara ile devam etmesini iste. Cevap çok kısa ve öz olsun. SADECE yanıt metni.")
 
                 final_reply = model.generate_content(final_prompt).text.strip()
 

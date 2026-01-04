@@ -284,7 +284,12 @@ def kargo_bilgisi_getir(no, user_role=None):
 
     conn = get_db_connection()
     try:
-        query = "SELECT h.durum_adi, k.teslim_adresi, k.tahmini_teslim FROM kargo_takip k JOIN hareket_cesitleri h ON k.durum_id = h.id WHERE k.takip_no = ? OR k.siparis_no = ?"
+        query = ("SELECT h.durum_adi, k.teslim_adresi, k.tahmini_teslim "
+                 "FROM kargo_takip k "
+                 "JOIN hareket_cesitleri h "
+                 "ON k.durum_id = h.id "
+                 "WHERE k.takip_no = ? "
+                 "OR k.siparis_no = ?")
         row = conn.execute(query, (no, no)).fetchone()
 
         if not row:
@@ -350,7 +355,11 @@ def tahmini_teslimat_saati_getir(no):
     if not no: return "Numara bulunamadı."
     conn = get_db_connection()
     try:
-        query = "SELECT tahmini_teslim, durum_adi FROM kargo_takip JOIN hareket_cesitleri ON durum_id = id WHERE takip_no = ? OR siparis_no = ?"
+        query = ("SELECT tahmini_teslim, durum_adi "
+                 "FROM kargo_takip JOIN hareket_cesitleri "
+                 "ON durum_id = id "
+                 "WHERE takip_no = ? "
+                 "OR siparis_no = ?")
         row = conn.execute(query, (no, no)).fetchone()
         if not row: return "Kayıt yok."
         if row['durum_adi'] == "TESLIM_EDILDI": return f"Kargonuz {row['tahmini_teslim']} tarihinde teslim edilmiştir."
@@ -444,25 +453,50 @@ def kargo_iptal_et(no):
     finally:
         conn.close()
 
-def takip_numarasi_hatasi(musteri_id=None):
-    import random
-    yeni_no = str(random.randint(100000, 999999))
+def isimle_kargo_bul(ad_soyad, telefon):
     conn = get_db_connection()
     try:
-        bugun = datetime.now().strftime('%Y-%m-%d')
-        real_user_id = musteri_id if musteri_id else 9999
-        mock_alici_id = 1002
+        ad_clean = metin_temizle(ad_soyad)
+        tel_clean = metin_temizle(telefon)
 
-        conn.execute("INSERT INTO siparisler (siparis_no, gonderici_id, alici_id, urun_tanimi) VALUES (?, ?, ?, ?)",
-                     (yeni_no, real_user_id, mock_alici_id, "Hatalı Numara Yenileme"))
-        conn.execute(
-            "INSERT INTO kargo_takip (takip_no, siparis_no, durum_id, tahmini_teslim, teslim_adresi) VALUES (?, ?, ?, ?, ?)",
-            (yeni_no, yeni_no, 1, bugun, "Yenileme Adresi"))
-        conn.commit()
-        return f"YENİ_NO_OLUŞTU|{yeni_no}"
+        if not ad_clean or not tel_clean:
+            return "HATA|Lütfen adınızı ve telefon numaranızı eksiksiz söyleyin."
+
+        musteri = conn.execute("""
+            SELECT musteri_id, ad_soyad
+            FROM musteriler 
+            WHERE lower(ad_soyad) LIKE ? AND telefon LIKE ?
+        """, (f"%{ad_clean}%", f"%{tel_clean}%")).fetchone()
+
+        if not musteri:
+            return f"HATA|Sistemde '{ad_clean}' isminde ve telefon numarası eşleşen kayıt bulunamadı."
+
+        mid = musteri['musteri_id']
+        m_ad = musteri['ad_soyad']
+
+        son_kargo = conn.execute("""
+            SELECT k.takip_no, s.gonderici_id, s.alici_id
+            FROM kargo_takip k
+            JOIN siparisler s ON k.siparis_no = s.siparis_no
+            WHERE s.gonderici_id = ? OR s.alici_id = ?
+            ORDER BY k.tahmini_teslim DESC LIMIT 1
+        """, (mid, mid)).fetchone()
+
+        if son_kargo:
+            bulunan_no = son_kargo['takip_no']
+
+            if son_kargo['gonderici_id'] == mid:
+                hesaplanan_rol = "gonderici"
+            else:
+                hesaplanan_rol = "alici"
+
+            return f"BASARILI|{bulunan_no}|{m_ad}|{hesaplanan_rol}|{mid}"
+        else:
+            return f"HATA|{m_ad} ismine ait profil buldum ama aktif bir kargo kaydı yok."
+
     except Exception as e:
-        print(f"HATA: {e}")
-        return "HATA|Yeni numara oluşturulamadı."
+        print(f"DB Hatası: {e}")
+        return "HATA|Sistem hatası."
     finally:
         conn.close()
 
@@ -573,7 +607,8 @@ def sube_sorgula(lokasyon):
     try:
         if lokasyon and "genel" not in lokasyon.lower() and "nerede" not in lokasyon.lower():
             lokasyon_temiz = f"%{lokasyon}%"
-            query = "SELECT sube_adi, il, ilce, adres, telefon FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?"
+            query = ("SELECT sube_adi, il, ilce, adres, telefon "
+                     "FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?")
             rows = cursor.execute(query, (lokasyon_temiz, lokasyon_temiz, lokasyon_temiz)).fetchall()
 
             if not rows:
@@ -665,7 +700,8 @@ def sube_saat_sorgula(lokasyon):
     try:
         if lokasyon and "genel" not in lokasyon.lower():
             lokasyon_temiz = f"%{lokasyon}%"
-            query = "SELECT sube_adi, calisma_saatleri FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?"
+            query = ("SELECT sube_adi, calisma_saatleri "
+                     "FROM subeler WHERE sube_adi LIKE ? OR il LIKE ? OR ilce LIKE ?")
             rows = conn.execute(query, (lokasyon_temiz, lokasyon_temiz, lokasyon_temiz)).fetchall()
 
             if not rows: return f"'{lokasyon}' isminde bir şubemiz bulunamadı."
@@ -746,7 +782,7 @@ def sube_telefon_sorgula(lokasyon):
     finally:
         conn.close()
 
-def kargo_durum_destek(takip_no, musteri_id):
+def kargo_durum_destek(takip_no):
     if not takip_no: return "İşlem yapabilmem için takip numarası gerekli."
 
     conn = get_db_connection()
