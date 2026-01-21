@@ -1,82 +1,120 @@
-# Gemini-Powered Customer Service System
+# 🤖 Gemini-Powered Customer Service System
 
-This project is an end-to-end intelligent customer service assistant that integrates modern Large Language Models (LLMs) with traditional Machine Learning (ML) algorithms. Developed as part of the "Applications of Artificial Intelligence" course, it demonstrates how to build stateful, multimodal agents for industrial use cases such as logistics and sentiment-driven customer support.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![Flask](https://img.shields.io/badge/Flask-2.x-black.svg)
+![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-ML-orange.svg)
+![Gemini](https://img.shields.io/badge/Google-Gemini_API-red.svg)
 
-------------------------------------------------------------
+An **end-to-end intelligent customer service assistant** integrating modern **Large Language Models (LLMs)** with **traditional Machine Learning algorithms**.  
+Developed as part of the *Applications of Artificial Intelligence* course, this project demonstrates how to build **stateful, multimodal AI agents** for industrial use cases such as logistics and sentiment-driven customer support.
 
-KEY TECHNICAL HIGHLIGHTS
+---
 
-- Hybrid AI Architecture: Combines Google Gemini API for natural language generation with custom Scikit-learn models (Logistic Regression & Linear Regression) for sentiment analysis and delivery time forecasting.
-- Multimodal Interaction: Integrated gTTS (Google Text-to-Speech) to provide natural-sounding voice responses alongside text-based chat.
-- State-Aware Dialogue: Session-based conversation management to maintain context across multi-turn user interactions.
-- Operational Intelligence: Automated modules for cargo tracking, tax calculation, and database-driven complaint logging.
+## ✨ Key Technical Highlights
 
-------------------------------------------------------------
+- **Hybrid AI Architecture**  
+  Google Gemini API for natural language generation + Scikit-learn models  
+  (Logistic Regression for sentiment analysis & Linear Regression for delivery time forecasting)
 
-PREREQUISITES & INSTALLATION
+- **Multimodal Interaction**  
+  gTTS-powered voice responses alongside text-based chat
 
-API KEY ACQUISITION
+- **State-Aware Dialogue**  
+  Session-based conversation memory across multi-turn interactions
 
-This project requires a Google Gemini API Key.
+- **Operational Intelligence**  
+  Cargo tracking, tax calculation, and database-driven complaint logging
 
-1) Go to: https://aistudio.google.com/
-2) Log in with your Google account.
-3) Click "Get API Key" and generate a new key.
+---
 
-------------------------------------------------------------
+## 🖥️ Demo
 
-CLONE THE REPOSITORY
+> Replace the file below with your own demo recording
 
+![Demo GIF](assets/demo.gif)
+
+Or watch the demo video:  
+[▶️ Demo Video](assets/demo_video.mp4)
+
+---
+
+## 📸 Screenshots
+
+| Chat Interface | Voice Response | Database Logs |
+|----------------|----------------|---------------|
+| ![Chat](assets/screenshot_chat.png) | ![Voice](assets/screenshot_voice.png) | ![DB](assets/screenshot_db.png) |
+
+> Place your screenshots inside an `assets/` folder.
+
+---
+
+## ⚙️ Prerequisites & Installation
+
+### 🔑 Google Gemini API Key
+
+1. Go to: https://aistudio.google.com/  
+2. Log in with your Google account  
+3. Click **"Get API Key"** and generate a new key
+
+---
+
+### 📥 Clone the Repository
+
+```bash
 git clone https://github.com/dogaece-koca/ai_customerservice.git
 cd ai_customerservice
 pip install -r requirements.txt
 
-------------------------------------------------------------
+###🛠️ Environment Configuration
 
-ENVIRONMENT CONFIGURATION
-
-Create a file named .env in the root directory and add:
+Create a .env file in the root directory:
 
 GEMINI_API_KEY=your_actual_api_key_here
 
 Ensure .env is included in .gitignore to prevent key exposure.
 
-------------------------------------------------------------
 
-PROJECT STRUCTURE
+Project Structure
 
-webhook.py
-Main Flask server handling API routing and frontend interaction
+ai_customerservice/
+│
+├── webhook.py
+│   └─ Main Flask server handling API routing & frontend
+│
+├── modules/
+│   ├── gemini_ai.py
+│   │   └─ LLM orchestration & prompt engineering
+│   │
+│   ├── ml_modulu.py
+│   │   └─ Sentiment & delivery-time ML models
+│   │
+│   └── database.py
+│       └─ SQLite persistence layer
+│
+├── db_simulasyon_kurulum.py
+│   └─ Database initialization script
+│
+└── assets/
+    └─ Screenshots & demo media
 
-modules/gemini_ai.py
-LLM orchestration and prompt engineering logic
 
-modules/ml_modulu.py
-Training and inference for Logistic & Linear Regression models
+Running the Application
 
-modules/database.py
-SQLite integration for persistence of customer and complaint data
-
-------------------------------------------------------------
-
-RUNNING THE APPLICATION
-
-INITIALIZE THE DATABASE
+1) Initialize the Database
 
 python db_simulasyon_kurulum.py
 
-START THE SERVER
+2) Start the Server
 
 python webhook.py
 
-ACCESS THE WEB INTERFACE
+3) Open Web Interface
 
-Open in your browser:
 http://127.0.0.1:5000
 
-------------------------------------------------------------
 
-FEATURES DEMONSTRATED
+Features Demonstrated
 
 - LLM-powered conversational agent with structured intent handling
 - Classical ML integration inside LLM-driven workflows
@@ -84,16 +122,35 @@ FEATURES DEMONSTRATED
 - Database-backed customer service simulation
 - Voice-enabled assistant responses
 
-------------------------------------------------------------
 
-NOTES
+Notes
 
 This project is developed for academic and demonstration purposes.
 Model performance and dataset size can be extended for production deployment.
 
-------------------------------------------------------------
 
-AUTHOR
+Possible Future Improvements
+
+- Docker containerization
+- REST API documentation (Swagger)
+- Multi-language support
+- Real shipment tracking API integration
+
+
+Author
 
 Doğa Ece Koca
 GitHub: https://github.com/dogaece-koca
+LinkedIn: (optional — add if you want)
+
+If you find this project useful, consider giving it a star!
+
+
+Assets Folder Guide
+
+assets/
+├── demo.gif
+├── demo_video.mp4
+├── screenshot_chat.png
+├── screenshot_voice.png
+└── screenshot_db.png
