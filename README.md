@@ -28,16 +28,6 @@ Developed as part of the *Applications of Artificial Intelligence* course, this 
 
 ---
 
-## 📸 Screenshots
-
-| Chat Interface | Voice Response | Database Logs |
-|----------------|----------------|---------------|
-| ![Chat](assets/screenshot_chat.png) | ![Voice](assets/screenshot_voice.png) | ![DB](assets/screenshot_db.png) |
-
-> Place your screenshots inside an `assets/` folder.
-
----
-
 ## ⚙️ Prerequisites & Installation
 
 ### 🔑 Google Gemini API Key
