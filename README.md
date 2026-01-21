@@ -28,17 +28,6 @@ Developed as part of the *Applications of Artificial Intelligence* course, this 
 
 ---
 
-## 🖥️ Demo
-
-> Replace the file below with your own demo recording
-
-![Demo GIF](assets/demo.gif)
-
-Or watch the demo video:  
-[▶️ Demo Video](assets/demo_video.mp4)
-
----
-
 ## 📸 Screenshots
 
 | Chat Interface | Voice Response | Database Logs |
@@ -66,7 +55,7 @@ git clone https://github.com/dogaece-koca/ai_customerservice.git
 cd ai_customerservice
 pip install -r requirements.txt
 ```
-
+---
 ### 🛠️ Environment Configuration
 
 Create a .env file in the root directory:
@@ -76,6 +65,7 @@ GEMINI_API_KEY=your_actual_api_key_here
 ```
 Ensure .env is included in .gitignore to prevent key exposure.
 
+---
 
 ### 📂 Project Structure
 
@@ -101,6 +91,7 @@ ai_customerservice/
 └── assets/
     └─ Screenshots & demo media
 ```
+---
 
 ### 🚀 Running the Application
 
@@ -116,12 +107,7 @@ python webhook.py
 ```bash
 http://127.0.0.1:5000
 ```
-
-Notes
-
-This project is developed for academic and demonstration purposes.
-Model performance and dataset size can be extended for production deployment.
-
+---
 
 ### 🛠️ Future Improvements
 [ ] Docker containerization for easier deployment.
@@ -132,12 +118,12 @@ Model performance and dataset size can be extended for production deployment.
 
 [ ] Integration with real-world shipment tracking APIs.
 
+---
 
 ### 👤 Author
 
 Doğa Ece Koca
 GitHub: https://github.com/dogaece-koca
-LinkedIn: (optional — add if you want)
 
 If you find this project useful, consider giving it a star!
 
